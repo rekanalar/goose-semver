@@ -19,16 +19,22 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          set -euo pipefail
-          gh api -X PATCH "repos/${{ github.repository }}" \
+          set -uo pipefail
+          out=$(gh api -X PATCH "repos/${{ github.repository }}" \
             -f "description=Semantic versions for the Goose programming language" \
-            --jq '.description'
+            --jq '.description' 2>&1)
+          rc=$?
+          echo "::error title=The description did not go::${out}"
+          exit $rc
 
       - name: Set the topics
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          set -euo pipefail
-          gh api -X PUT "repos/${{ github.repository }}/topics" \
+          set -uo pipefail
+          out=$(gh api -X PUT "repos/${{ github.repository }}/topics" \
             -f "names=goose,goose-lang,semver,versioning" \
-            --jq '.names | join(", ")'
+            --jq '.names | join(", ")' 2>&1)
+          rc=$?
+          echo "::error title=The topics did not go::${out}"
+          exit $rc
