@@ -1,0 +1,33 @@
+name: Set the description and the topics
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/metadata.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  set:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set the description
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh api -X PATCH "repos/${{ github.repository }}" \
+            -f "description=Semantic versions for the Goose programming language" \
+            --jq '.description'
+
+      - name: Set the topics
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh api -X PUT "repos/${{ github.repository }}/topics" \
+            -f "names=goose,goose-lang,semver,versioning" \
+            --jq '.names | join(", ")'
