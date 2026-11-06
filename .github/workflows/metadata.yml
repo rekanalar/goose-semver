@@ -35,13 +35,8 @@ jobs:
             echo "A fork of the index:"
             gh api -X POST repos/safdafang/goose-index/forks --jq '.full_name' 2>&1
           } > "${report}" 2>&1
-          cat "${report}"
-          {
-            echo "### The result"
-            echo '```'
-            cat "${report}"
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+          text=$(sed -e 's/%/%25/g' -e 's/\r/%0D/g' -e 's/\n/%0A/g' "${report}")
+          echo "::error title=The result of the run::${text}"
           git config user.name "Jim Geovedi"
           git config user.email "jim@geovedi.com"
           git checkout -B logs
