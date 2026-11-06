@@ -14,6 +14,10 @@ jobs:
   set:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
       - name: Set the description and the topics
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -37,6 +41,7 @@ jobs:
           } > "${report}" 2>&1
           cat "${report}"
       - name: Record the result
+        if: always()
         run: |
           set -uo pipefail
           git config user.name "Jim Geovedi"
