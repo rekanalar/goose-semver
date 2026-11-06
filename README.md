@@ -14,14 +14,14 @@ Semantic versions for Goose: parse, compare, and format SemVer 2.0.0 strings.
 Put this line in the root file of your program:
 
 ```goose
-import semver from "rekanalar/goose-semver@v1";
+import semver from "rekanalar/goose-semver@v0.1.0";
 ```
 
 ## Example
 
 ```goose
 import std;
-import semver from "rekanalar/goose-semver@v1";
+import semver from "rekanalar/goose-semver@v0.1.0";
 
 fn main() {
     let a, ok = semver::parse("1.2.3-alpha.1");
