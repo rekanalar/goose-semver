@@ -29,15 +29,15 @@ jobs:
             echo "The description:"
             gh api -X PATCH "repos/${REPO}" \
               -f "description=Semantic versions for the Goose programming language" \
-              --jq '.description' 2>&1
+              --jq '.description' 2>&1 || true
             echo
             echo "The topics:"
             gh api -X PUT "repos/${REPO}/topics" \
               -f "names=goose,goose-lang,semver,versioning" \
-              --jq '.names | join(", ")' 2>&1
+              --jq '.names | join(", ")' 2>&1 || true
             echo
             echo "A fork of the index:"
-            gh api -X POST repos/safdafang/goose-index/forks --jq '.full_name' 2>&1
+            gh api -X POST repos/safdafang/goose-index/forks --jq '.full_name' 2>&1 || true
           } > "${report}" 2>&1
           cat "${report}"
       - name: Record the result
