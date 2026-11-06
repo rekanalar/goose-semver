@@ -20,16 +20,33 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           set -uo pipefail
+          report="$RUNNER_TEMP/report.txt"
           {
-            echo "### The metadata of ${REPO}"
-            echo
-            echo 'The description:'
+            echo "The description:"
             gh api -X PATCH "repos/${REPO}" \
               -f "description=Semantic versions for the Goose programming language" \
-              --jq '.description' 2>&1 | sed 's/^/> /'
+              --jq '.description' 2>&1
             echo
-            echo 'The topics:'
+            echo "The topics:"
             gh api -X PUT "repos/${REPO}/topics" \
               -f "names=goose,goose-lang,semver,versioning" \
-              --jq '.names | join(", ")' 2>&1 | sed 's/^/> /'
-          } | tee -a "$GITHUB_STEP_SUMMARY"
+              --jq '.names | join(", ")' 2>&1
+            echo
+            echo "A fork of the index:"
+            gh api -X POST repos/safdafang/goose-index/forks --jq '.full_name' 2>&1
+          } > "${report}" 2>&1
+          cat "${report}"
+          {
+            echo "### The result"
+            echo '```'
+            cat "${report}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          git config user.name "Jim Geovedi"
+          git config user.email "jim@geovedi.com"
+          git checkout -B logs
+          mkdir -p .logs
+          cp "${report}" .logs/metadata.txt
+          git add .logs/metadata.txt
+          git commit -m "chore: record the result of the metadata run" || true
+          git push -f origin logs
