@@ -9,7 +9,7 @@ on:
 
 permissions:
   contents: write
-  metadata: write
+  administration: write
 
 jobs:
   set:
