@@ -14,26 +14,22 @@ jobs:
   set:
     runs-on: ubuntu-latest
     steps:
-      - name: Set the description
+      - name: Set the description and the topics
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
         run: |
           set -uo pipefail
-          out=$(gh api -X PATCH "repos/${{ github.repository }}" \
-            -f "description=Semantic versions for the Goose programming language" \
-            --jq '.description' 2>&1)
-          rc=$?
-          echo "::error title=The description did not go::${out}"
-          exit $rc
-
-      - name: Set the topics
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -uo pipefail
-          out=$(gh api -X PUT "repos/${{ github.repository }}/topics" \
-            -f "names=goose,goose-lang,semver,versioning" \
-            --jq '.names | join(", ")' 2>&1)
-          rc=$?
-          echo "::error title=The topics did not go::${out}"
-          exit $rc
+          {
+            echo "### The metadata of ${REPO}"
+            echo
+            echo 'The description:'
+            gh api -X PATCH "repos/${REPO}" \
+              -f "description=Semantic versions for the Goose programming language" \
+              --jq '.description' 2>&1 | sed 's/^/> /'
+            echo
+            echo 'The topics:'
+            gh api -X PUT "repos/${REPO}/topics" \
+              -f "names=goose,goose-lang,semver,versioning" \
+              --jq '.names | join(", ")' 2>&1 | sed 's/^/> /'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
