@@ -1,5 +1,7 @@
 # goose-semver
 
+[![ci](https://github.com/rekanalar/goose-semver/actions/workflows/ci.yml/badge.svg)](https://github.com/rekanalar/goose-semver/actions/workflows/ci.yml)
+
 Semantic versions for Goose: parse, compare, and format SemVer 2.0.0 strings.
 
 ## Features
