@@ -1,6 +1,6 @@
 // Cases made by test/make_npm_cases.js with npm semver 7.6.1.
 // Do not edit by hand. Make the file again with the script.
-// The file holds 1510 cases.
+// The file holds 1920 cases.
 
 namespace npm_cases;
 
@@ -1806,4 +1806,517 @@ fn check_simplify() {
     simplify_case("0.1.0 1.2.2 2.1.1 2.1.1 2.3.3 2.3.3", "*", "*");
     simplify_case("0.0.1 0.3.3 2.0.2", "~1.3.0 =X", "");
     simplify_case("0.0.3 0.2.2 0.3.3 1.1.2 1.2.0 2.1.1 2.2.2", "<3.2.x", "*");
+}
+// The calls with the includePrerelease flag. The flag turns the
+// same-tuple rule of the pre-release off.
+
+fn sat_case_pre(a: const u8[:], range: const u8[:], want: bool) {
+    let x, ok = semver::parse(a);
+    assert(ok);
+    var o = semver::RangeOpts { include_prerelease: true };
+    assert(semver::satisfies_o(x, range, o) == want);
+}
+
+fn select_case_pre(list: const u8[:], range: const u8[:], mx: const u8[:], mn: const u8[:]) {
+    let vs = words(list);
+    var o = semver::RangeOpts { include_prerelease: true };
+    want_place(vs[..], semver::max_satisfying_o(vs[..], range, o), mx);
+    want_place(vs[..], semver::min_satisfying_o(vs[..], range, o), mn);
+}
+
+fn outside_case_pre(v: const u8[:], range: const u8[:], hi: bool, lo: bool) {
+    let x, ok = semver::parse(v);
+    assert(ok);
+    var o = semver::RangeOpts { include_prerelease: true };
+    assert(semver::gtr_o(x, range, o) == hi);
+    assert(semver::ltr_o(x, range, o) == lo);
+    assert(semver::outside_o(x, range, ">", o) == hi);
+    assert(semver::outside_o(x, range, "<", o) == lo);
+}
+
+fn range_case_pre(text: const u8[:], want: const u8[:]) {
+    var out: u8[>..] = [];
+    var o = semver::RangeOpts { include_prerelease: true };
+    if want == "null" {
+        assert(!semver::valid_range_o(out, text, o));
+    } else {
+        assert(semver::valid_range_o(out, text, o));
+        assert(out[..] == want);
+    }
+}
+
+fn minversion_case_pre(range: const u8[:], want: const u8[:]) {
+    var out: u8[>..] = [];
+    var o = semver::RangeOpts { include_prerelease: true };
+    let ok = semver::min_version_o(out, range, o);
+    if want == "null" {
+        assert(!ok);
+        assert(out.len == 0);
+    } else {
+        assert(ok);
+        assert(out[..] == want);
+    }
+}
+
+fn pair_case_pre(a: const u8[:], b: const u8[:], inter: bool, sub: bool) {
+    var o = semver::RangeOpts { include_prerelease: true };
+    assert(semver::intersects_o(a, b, o) == inter);
+    assert(semver::subset_o(a, b, o) == sub);
+}
+
+fn comparators_case_pre(range: const u8[:], want: const u8[:]) {
+    var norm: u8[>..] = [];
+    var parts: const u8[:][>..] = [];
+    var ends: i64[>..] = [];
+    var o = semver::RangeOpts { include_prerelease: true };
+    assert(semver::to_comparators_o(norm, parts, ends, range, o));
+    var got: u8[>..] = [];
+    var at: i64 = 0;
+    var i: i64 = 0;
+    while i < ends.len {
+        if i > 0 { got.push('|'); }
+        var j: i64 = at;
+        while j < ends[i] {
+            if j > at { got.push(' '); }
+            got.append(parts[j]);
+            j += 1;
+        }
+        at = ends[i];
+        i += 1;
+    }
+    assert(got[..] == want);
+}
+
+fn simplify_case_pre(versions: const u8[:], range: const u8[:], want: const u8[:]) {
+    let vs = words(versions);
+    var out: u8[>..] = [];
+    var o = semver::RangeOpts { include_prerelease: true };
+    assert(semver::simplify_range_o(out, vs[..], range, o));
+    assert(out[..] == want);
+}
+
+fn check_include_pre() {
+    sat_case_pre("2.3.1-1", "> 1.1.1-0", true);
+    sat_case_pre("1.1.1-beta.1", "=3.3.1-alpha <1.1.2 >=X || >=x ~ 0.3.2 || 1.2 <= 1.1.0", false);
+    sat_case_pre("2.0.1-0", "^1.3.3 ~1.2.x >X", false);
+    sat_case_pre("2.1.1-0", "", true);
+    sat_case_pre("0.3.0-beta.2", "*", true);
+    sat_case_pre("1.0.0", "*", true);
+    sat_case_pre("2.0.3", "*", true);
+    sat_case_pre("0.0.3-0", "=*", true);
+    sat_case_pre("2.2.3", "<=2", true);
+    sat_case_pre("2.1.1", "~0.x ^0.1.x", false);
+    sat_case_pre("2.0.0", "*", true);
+    sat_case_pre("1.1.1-1", "^2.3.x 3.0", false);
+    sat_case_pre("0.3.2-beta.1", "1.0 - 1.x", false);
+    sat_case_pre("1.2.2-0", "", true);
+    sat_case_pre("1.1.1", "~>0.3.1-beta.1 >0.x ~0.3", false);
+    sat_case_pre("0.1.2", "0.2.1-beta.1 - 1.x || =2.1.3 ~ x ^3.0.2", false);
+    sat_case_pre("2.0.0-beta.2", "*", true);
+    sat_case_pre("2.1.3", "x - 3.1.0 || ^ 1.2.2-alpha ~>0.0 >=0.1.x", true);
+    sat_case_pre("1.1.2", "x 0.1", false);
+    sat_case_pre("0.0.1-0", ">=3 ~1.0.x", false);
+    sat_case_pre("2.0.1", "> 3.1.1 ~2.3.3", false);
+    sat_case_pre("2.1.3", "<=0.1.x <3.0.1 x", false);
+    sat_case_pre("1.2.1", "~>2.1.1-rc.1 <2.2.x 0.1 || 0 || ~1.1.2", false);
+    sat_case_pre("0.2.0-alpha", "2.3.3-beta.1 - 3.3 || >=2.3.2 ^2.x || 1.3.x - 2.2", false);
+    sat_case_pre("2.3.1-0", "=3 ~0.0.2", false);
+    sat_case_pre("0.1.1-beta.2", "2.0.0 ^* || 2.0.3 - 3.3 || ~>1.x", false);
+    sat_case_pre("1.1.1", "<=1 ~3.x", false);
+    sat_case_pre("2.3.0-alpha", "~>2.1.1 >=0.1.2 || 2.3.0", false);
+    sat_case_pre("1.0.0-beta.2", "<0.0.2 ^3.0.3 =3", false);
+    sat_case_pre("1.1.2-0", "3.1.0 ^*", false);
+    sat_case_pre("1.1.3-0", ">=0.x || ^1.3.0 >=3.0.x 0.3.x", true);
+    sat_case_pre("2.3.1-1", "*", true);
+    sat_case_pre("1.1.1", "0.0.1 >=1.2.x ^2.3 || <=1 ^1.0.0", true);
+    sat_case_pre("0.2.2", "^1 ~>2.2.2", false);
+    sat_case_pre("0.3.3", "1.2 ~>1.0.3", false);
+    sat_case_pre("0.3.0-beta.2", "", true);
+    sat_case_pre("2.3.3-alpha", "< 2.1.2-alpha ^1.x", false);
+    sat_case_pre("0.3.0-beta.1", "^ x", true);
+    sat_case_pre("2.3.1", "^2.x <3.0.0", true);
+    sat_case_pre("1.1.3-1", "3.2.x >2.2.1 ^2.2.x", false);
+    sat_case_pre("2.1.3", "~>0.0.x <*", false);
+    sat_case_pre("0.3.1", "<=3 >=2.1.2", false);
+    sat_case_pre("2.0.1-1", "~>* || ~3.3.2 || =0.3.1-alpha", true);
+    sat_case_pre("0.2.1", "3.3.2 - 1.3.0", false);
+    sat_case_pre("1.1.1-beta.2", "<3.x ^X || >=3.3.x || >=*", true);
+    sat_case_pre("1.0.0", "^1.1.0 <3.3.0 ~1.2.1-beta.1 || 0.x ^2.2.3 || ^0.2.2", false);
+    sat_case_pre("0.0.2-alpha", "<=0.0.2 ^ 3", false);
+    sat_case_pre("1.2.1-1", "0.1.1", false);
+    sat_case_pre("1.3.3-beta.2", "*", true);
+    sat_case_pre("2.2.2", "0.0.x >1 <=3.2", false);
+    sat_case_pre("0.3.2", "<1.1.0-beta.1 || ^0.3.2", true);
+    sat_case_pre("0.3.2-beta.2", "=3.3.x ~> 3.1.2", false);
+    sat_case_pre("2.3.0", "<x 0.0.2 || <0.1.3 0.2.1 =1.3.x || 0.2.0-beta.1 ~2.3.2 <x", false);
+    sat_case_pre("1.2.2-alpha", "0.3.2-beta.1 ~> 3.2.1-alpha <=2.2.x", false);
+    sat_case_pre("2.1.0", "^1.1.x || 2.x >=0.0.0 <2.0.2 || 2.3.0-alpha - 3.0.x", false);
+    sat_case_pre("0.2.0", "^1.1.2 >=2 || 3.1.1-beta.1 - 1.0 || ^x", true);
+    sat_case_pre("2.1.2", "*", true);
+    sat_case_pre("1.1.2-rc.1.2", "0.0 - 2.1 || 3.0.x - 2.1.1 ||  2.3.x", true);
+    sat_case_pre("2.1.3-beta.1", "=1.1.0", false);
+    sat_case_pre("1.2.0", "~>1.2.3 ~1.3.x =1.0", false);
+    select_case_pre("2.2.1-rc.1.2 2.3.2-rc.1.2+10 0.0.1-rc.1.2+001", ">=0.1.x", "2.3.2-rc.1.2+10", "2.2.1-rc.1.2");
+    select_case_pre("2.3.0", "~ x <=1.x <=1.2.1 || <=3.3.3 =x ~0.3.x || ~1.1.x >1.0.1 ~> 3.0", "null", "null");
+    select_case_pre("2.3.3-0+001 2.3.2-0+a 2.1.1", "^0.1.1 || >=* || 3.0.1 - 3.3.x", "2.3.3-0+001", "2.1.1");
+    select_case_pre("2.0.0+001 1.2.3-0+a.b 0.0.1-alpha 1.2.1-beta.1 1.1.2+1", "0.2.2 >=2.1.1 || ^ *  0.2.x 3", "null", "null");
+    select_case_pre("1.0.3-alpha+10 1.3.2-beta.1 2.2.3-beta.1+a.b 0.0.2-1+1 2.0.0-beta.1 0.3.0+a.1", " 3.1.x <=0.2 >=1.0.0 || x - 1.3.x || 2.0.2 - 1.x", "1.3.2-beta.1", "0.0.2-1+1");
+    select_case_pre("0.3.1-beta.1+b 1.3.1 2.2.3 1.1.3+a.b 0.3.2-1+a", ">=3", "null", "null");
+    select_case_pre("2.0.1-0+001 1.1.1-rc.1.2", "0.3.2 - 2.0.3", "2.0.1-0+001", "1.1.1-rc.1.2");
+    select_case_pre("1.3.1-1+a 0.1.2-alpha+a.b 1.2.1+1 1.3.3-beta.2 1.2.1-beta.2 2.0.2-rc.1.2", "<= x", "2.0.2-rc.1.2", "0.1.2-alpha+a.b");
+    select_case_pre("0.3.3-beta.2+001 2.3.0-0+a.b 2.3.3-beta.2+10", "^3.1", "null", "null");
+    select_case_pre("1.1.3 0.1.3-beta.2+b 0.0.3", "=0.x * >2.3.3", "null", "null");
+    select_case_pre("0.1.1-1+a.1 1.2.0-alpha+b", "", "1.2.0-alpha+b", "0.1.1-1+a.1");
+    select_case_pre("2.3.1-beta.1 0.3.0+10 2.3.0+10 0.0.0-alpha 2.1.1-beta.2 0.2.0+1", "", "2.3.1-beta.1", "0.0.0-alpha");
+    select_case_pre("0.3.2-beta.2+a.b 0.0.2-0+b 1.0.3-beta.1+1 2.0.1+10 2.0.1-1", "*", "2.0.1+10", "0.0.2-0+b");
+    select_case_pre("0.1.2-alpha+001 2.0.1-rc.1.2+001 0.0.2-0+a.b 0.1.3-beta.2 2.0.3-rc.1.2+10 1.2.0-alpha+a.1", ">=0.3.2 || 0.2.2 - 2.2.1", "2.0.3-rc.1.2+10", "1.2.0-alpha+a.1");
+    select_case_pre("0.2.2-alpha 1.2.1+a 0.3.2-beta.2+001", "^1.2.1 1.3.1-0 || 1.0.x - 0.3.2 || 0.1.2 - 0.x", "0.3.2-beta.2+001", "0.2.2-alpha");
+    select_case_pre("0.1.2-beta.1 1.2.3-rc.1.2+a 0.0.2-beta.2+a.1 2.0.1-1 1.1.1-alpha+a 2.3.2-beta.2+a", "=1.3.0", "null", "null");
+    select_case_pre("1.0.3-1 2.2.3+10 1.0.2 2.0.3-1+a 2.1.1-rc.1.2+1 0.0.1", "> 3  2 =1.3.x", "null", "null");
+    select_case_pre("1.1.3-alpha+a 2.1.0-0", ">=2.0 || ^0.2 ^3.x", "2.1.0-0", "2.1.0-0");
+    select_case_pre("2.0.0-beta.1+a 2.1.0-beta.1+001", "~ 2.x <=2.1.3 >2.3.2", "null", "null");
+    select_case_pre("0.1.3-beta.1+a 2.0.3+001 1.0.0-alpha+a.b", "", "2.0.3+001", "0.1.3-beta.1+a");
+    select_case_pre("0.0.0+b 2.2.3-beta.2+1 0.0.1-beta.2+b 1.3.3-1+a.1", " x || >=1.3.x ~>2.0.x 3", "2.2.3-beta.2+1", "0.0.0+b");
+    select_case_pre("0.0.3-beta.2 0.1.3-0+10 2.0.2-alpha", "*", "2.0.2-alpha", "0.0.3-beta.2");
+    select_case_pre("1.0.2-rc.1.2", " 1.0.1 <=2.0.0 ~2.0.1", "null", "null");
+    select_case_pre("2.2.3-1", "~x >=3.3.0-rc.1", "null", "null");
+    select_case_pre("2.1.1-1+a.b 1.1.2-alpha 1.0.0+001 1.1.1-1+a.1 2.1.3-rc.1.2+a.1 0.0.0+a.b", "=1.x ~>0.2.x", "null", "null");
+    select_case_pre("1.0.0-1 2.0.3-0 2.1.3-rc.1.2", "", "2.1.3-rc.1.2", "1.0.0-1");
+    select_case_pre("1.1.3+b 1.2.2-beta.2+a.1 1.1.1-rc.1.2+1", "=2.2.1-rc.1 || > * 2 <0.2.x || 1.1.0 - 0", "null", "null");
+    select_case_pre("1.0.2-1+a 0.0.3+a.1 0.1.0-rc.1.2+a 0.1.3-0+a.b 0.3.1-alpha+10", "", "1.0.2-1+a", "0.0.3+a.1");
+    select_case_pre("2.1.2", "<= 2.0 || 3.0.0 - 0.3.2 || ^1.0.3 =2.2.1-rc.1 =2.0.2", "null", "null");
+    select_case_pre("1.3.1-0+a.1 1.1.2-rc.1.2 0.1.2-beta.2+b", "*", "1.3.1-0+a.1", "0.1.2-beta.2+b");
+    select_case_pre("0.3.2+b 2.2.3-rc.1.2 1.0.0+10 0.2.1-alpha 1.1.1-rc.1.2+10 1.0.3-1", "^1.2.3", "null", "null");
+    select_case_pre("2.0.1+001 1.3.2+b 1.2.0", "1.2.0 - 1.x || >3.1.1-0 <=1.x || * - *", "2.0.1+001", "1.2.0");
+    select_case_pre("0.0.1-alpha+a.1 1.0.1 2.3.1-1+001", "<=1.3.0", "1.0.1", "0.0.1-alpha+a.1");
+    select_case_pre("2.0.2+b 1.1.3-beta.2+a.1", "~>1.3.2", "null", "null");
+    select_case_pre("0.3.3-beta.1 2.0.2", "<1.2.0 >3 || 3.0.2 ~0.1.2-beta.1 >=0.2.x", "null", "null");
+    select_case_pre("0.1.2-beta.2+001 2.2.0-beta.1+a.b 0.0.1-beta.2 1.3.3-0+a 2.2.2-1", "", "2.2.2-1", "0.0.1-beta.2");
+    select_case_pre("1.2.3-beta.1+b", "2.3.2 =1.2.x", "null", "null");
+    select_case_pre("1.1.1-1 2.3.2+a 1.2.0-beta.1+a.b 1.0.1-alpha+001 2.2.1-1+a.b 1.2.3-beta.1", "0.x - 1 || <=0.1.2 ^1.1.x", "1.2.3-beta.1", "1.0.1-alpha+001");
+    select_case_pre("2.2.0+b 2.3.1-1 1.2.2-beta.1 1.3.0+a 1.3.0 0.1.0-0", "* =1.3.x", "1.3.0+a", "1.3.0+a");
+    select_case_pre("1.3.2-beta.1+a.b", "3.0.x - 2.2.0", "null", "null");
+    outside_case_pre("0.0.1", "~3.2.0-0 <1.1.3", true, false);
+    outside_case_pre("1.2.0-0", ">=X || ^x <=3.0.x", false, false);
+    outside_case_pre("1.1.1-0", "^2.1.x ~0.3 1.0 || 2.2.x - 1.3.0 || 0.1 - 3.2.3-beta.1", false, false);
+    outside_case_pre("0.3.2", "2 - 2.1 || ~>2.2.1 ~0.x", false, true);
+    outside_case_pre("0.2.2-beta.2", "~>2.0.1 || ~> X >x ~>0.1.3", false, true);
+    outside_case_pre("2.0.2-0", "~>3.0.1-rc.1 || >=1.0.1 ~2 ^2.3.0 || 2.2.0-0 - 1.1.1", false, false);
+    outside_case_pre("0.3.0", "~>3.0.0 || >2.2.2 >1.2 <1.x", false, false);
+    outside_case_pre("0.3.1", "~>1.2 >=1 ~>2.1.0", false, true);
+    outside_case_pre("2.2.0-1", "<1.x 2.1.x >0", true, false);
+    outside_case_pre("0.2.0", "~>1.1 >0.3.3", false, true);
+    outside_case_pre("2.0.3-alpha", "~>* >3.3.1", false, true);
+    outside_case_pre("2.1.1-beta.1", "~3.x", false, true);
+    outside_case_pre("0.1.1-alpha", ">=0.3.1 ~ 3.1.1 0.3.x || ~>1.1 ~0.1.1", false, true);
+    outside_case_pre("1.2.1-1", "<0.2.x ^1.1.0", true, false);
+    outside_case_pre("0.2.0-alpha", ">0.3.2 = 3.2.0 ~0.2.1", false, true);
+    outside_case_pre("2.1.0-rc.1.2", "=3.1 1.x =2.3.1 || >=1.1.3-beta.1 2.3.2 || = 2", false, false);
+    outside_case_pre("1.3.0-rc.1.2", "<3.3.2-beta.1 || =x", false, false);
+    outside_case_pre("0.3.3-beta.2", "^3.1.x <2.0 <*", true, false);
+    outside_case_pre("1.2.1-rc.1.2", "", false, false);
+    outside_case_pre("2.3.3-alpha", "<= 3.x 1.x", true, true);
+    outside_case_pre("0.0.2-1", "1.x - *", false, true);
+    outside_case_pre("2.1.0-rc.1.2", "~>2.0.3 || 1.x ~1.2.0", true, false);
+    outside_case_pre("2.3.1-alpha", "<=2.0.3 || 3.0.3 - X", false, false);
+    outside_case_pre("2.2.2-0", "", false, false);
+    outside_case_pre("1.0.1-rc.1.2", "2.1 - 1 || >=2.0", false, false);
+    outside_case_pre("0.0.2-rc.1.2", "^1", false, true);
+    outside_case_pre("2.2.3-rc.1.2", "<1.x ~1.1.3 <0.3.3 || ^X 1.0.0-rc.1 || <0.3.3 ^0", true, false);
+    outside_case_pre("0.3.0", "~>1.0.2 >0 <x", true, false);
+    outside_case_pre("1.0.1-rc.1.2", "0 ~* ^1.0", true, false);
+    outside_case_pre("0.1.0-rc.1.2", "", false, false);
+    outside_case_pre("0.1.0", ">=1.3 ^ 3.1.3 || >=1 ^1.0.3 3", false, true);
+    outside_case_pre("0.1.0-1", "<=1.3.3-beta.1 ^ 0.3.1-rc.1 <=2.0.1-beta.1", false, true);
+    outside_case_pre("1.1.3", "~1.x >1.3.2 <=1.1.x || 1.2 2.0.0 || 3.0.1 - 0.0.3", false, false);
+    outside_case_pre("2.3.2", "", false, false);
+    outside_case_pre("2.0.3-0", "", false, false);
+    outside_case_pre("2.0.3", "=0.2  3.1 ~>0.2.3 || ^1.1", true, false);
+    outside_case_pre("2.3.1", ">2.3.2 3.1.0 ~0.2.3-alpha || 0.1.x", true, false);
+    outside_case_pre("2.0.1", "^*", false, false);
+    outside_case_pre("2.0.3-rc.1.2", "0.3.1-beta.1 - 3.3.2 || 2.1.x - 1.1.2-alpha", false, false);
+    outside_case_pre("0.0.3", "3.2.1 - 0.3", false, false);
+    range_case_pre("x - *", "*");
+    range_case_pre("<=2.2.1 <*", "<0.0.0-0");
+    range_case_pre("1.3 - 2.0.x", ">=1.3.0-0 <2.1.0-0");
+    range_case_pre("<=1", "<2.0.0-0");
+    range_case_pre("<1.0 ^2.3.3", "<1.0.0-0 >=2.3.3 <3.0.0-0");
+    range_case_pre("^2.1.x", ">=2.1.0-0 <3.0.0-0");
+    range_case_pre("~2.3.3 ^3.1.2 <0", "<0.0.0-0");
+    range_case_pre("^1 ^X || ~>3.x ~>2 ^2", ">=1.0.0-0 <2.0.0-0||>=3.0.0 <4.0.0-0 >=2.0.0 <3.0.0-0 >=2.0.0-0");
+    range_case_pre("*", "*");
+    range_case_pre("~0.x >3.3.3 2.1.2", ">=0.0.0 <1.0.0-0 >3.3.3 2.1.2");
+    range_case_pre("2 || 3.0.3 - 0.0 || ~3.2.2 <1", ">=2.0.0-0 <3.0.0-0||>=3.0.3-0 <0.1.0-0||>=3.2.2 <3.3.0-0 <1.0.0-0");
+    range_case_pre("0.2.1 || =2.2.x >x >=1.1.0", "0.2.1");
+    range_case_pre("*", "*");
+    range_case_pre("0.1.3-alpha >=3.3.3 ^2.0.x || ~X 1.3.1 <1.3.3-beta.1 || ^3.3.2 ~>3.1.1-0 ~>3.x", "0.1.3-alpha >=3.3.3 >=2.0.0-0 <3.0.0-0||1.3.1 <1.3.3-beta.1||>=3.3.2 <4.0.0-0 >=3.1.1-0 <3.2.0-0 >=3.0.0");
+    range_case_pre("", "*");
+    range_case_pre("< 3.3.0", "<3.3.0");
+    range_case_pre("2.0.3-rc.1 =1.3.2 ^X", "2.0.3-rc.1 1.3.2");
+    range_case_pre("^0.x <=2.0.2 || >2.2.x 1.3", "<1.0.0-0 <=2.0.2||>=2.3.0-0 >=1.3.0-0 <1.4.0-0");
+    range_case_pre(">0 || ^1.1.3 <=1.1 1.2.1 || ~>3.0.0 ~3.2.0-rc.1", ">=1.0.0-0||>=1.1.3 <2.0.0-0 <1.2.0-0 1.2.1||>=3.0.0 <3.1.0-0 >=3.2.0-rc.1 <3.3.0-0");
+    range_case_pre("<=3", "<4.0.0-0");
+    range_case_pre(">2.3.x ~>0.1.x", ">=2.4.0-0 >=0.1.0 <0.2.0-0");
+    range_case_pre("~ 2.3.3 =3.3.3 >0.x", ">=2.3.3 <2.4.0-0 3.3.3 >=1.0.0-0");
+    range_case_pre("^X ^0.3.1 || ^2.0.x || =3.1.x", ">=0.3.1-0 <0.4.0-0||>=2.0.0-0 <3.0.0-0||>=3.1.0-0 <3.2.0-0");
+    range_case_pre("0.1 - 1.3.3", ">=0.1.0-0 <1.3.4-0");
+    range_case_pre("~>0.2.2 >1.3.3", ">=0.2.2 <0.3.0-0 >1.3.3");
+    range_case_pre("3.1.1", "3.1.1");
+    range_case_pre("2.2.0 >= 0", "2.2.0");
+    range_case_pre("~2.3 ~>0.0.3 ^1.2.0", ">=2.3.0 <2.4.0-0 >=0.0.3 <0.1.0-0 >=1.2.0 <2.0.0-0");
+    range_case_pre("2.3.x ~>1.3.x >=3.1.3 || <X ^0.x < 3.2.0-0", ">=2.3.0-0 <2.4.0-0 >=1.3.0 <1.4.0-0 >=3.1.3");
+    range_case_pre("~2 > 3.3.x", ">=2.0.0 <3.0.0-0 >=3.4.0-0");
+    range_case_pre("3.0.3", "3.0.3");
+    range_case_pre("<3 <0.1.2-0 <*", "<0.0.0-0");
+    range_case_pre("~3.2.0 >=1.0.2", ">=3.2.0 <3.3.0-0 >=1.0.2");
+    range_case_pre(">=2.0.0", ">=2.0.0");
+    range_case_pre(">=3.2 ~>1.x", ">=3.2.0-0 >=1.0.0 <2.0.0-0");
+    range_case_pre("3.x <3.3.0 >2.1.0-beta.1", ">=3.0.0-0 <4.0.0-0 <3.3.0 >2.1.0-beta.1");
+    range_case_pre("=0.2.x <=2.1.3 <=2", ">=0.2.0-0 <0.3.0-0 <=2.1.3 <3.0.0-0");
+    range_case_pre("^0.x 3 || =* ~>1.3.1 || ^1.2 =X ^0.2.x", "<1.0.0-0 >=3.0.0-0 <4.0.0-0||>=1.3.1 <1.4.0-0||>=1.2.0-0 <2.0.0-0 >=0.2.0-0 <0.3.0-0");
+    range_case_pre("", "*");
+    range_case_pre("2.3.3 - 1", ">=2.3.3-0 <2.0.0-0");
+    range_case_pre("*", "*");
+    range_case_pre("<0 ^0.x || ~1", ">=1.0.0 <2.0.0-0");
+    range_case_pre(">=1.3.x <=* || ~>1.2.1-0 >0.3.3 || 2", ">=1.3.0-0||>=1.2.1-0 <1.3.0-0 >0.3.3||>=2.0.0-0 <3.0.0-0");
+    range_case_pre("*", "*");
+    range_case_pre("~2.1.0 || >0.3.2-alpha ^1.2.0 ^3.2.1", ">=2.1.0 <2.2.0-0||>0.3.2-alpha >=1.2.0 <2.0.0-0 >=3.2.1 <4.0.0-0");
+    range_case_pre("~> 3.2.1 ~1.3.3 >=2.2.0", ">=3.2.1 <3.3.0-0 >=1.3.3 <1.4.0-0 >=2.2.0");
+    range_case_pre("<=2.x x =0.2.x", "<3.0.0-0 >=0.2.0-0 <0.3.0-0");
+    range_case_pre("2 ~2.0.3 * || ~>0.0 <3.1.0 0.3.1", ">=2.0.0-0 <3.0.0-0 >=2.0.3 <2.1.0-0||>=0.0.0 <0.1.0-0 <3.1.0 0.3.1");
+    range_case_pre("3 >=2.2 ^0.3.x", ">=3.0.0-0 <4.0.0-0 >=2.2.0-0 >=0.3.0-0 <0.4.0-0");
+    range_case_pre("^*", "*");
+    minversion_case_pre("2 ~ 1.0.3", "null");
+    minversion_case_pre("^0.2.3-alpha 0.3.0", "null");
+    minversion_case_pre(">1.2.3 <=0.1.1-alpha ~0.x", "null");
+    minversion_case_pre("~>* || =1.1.2-rc.1 <=x", "0.0.0");
+    minversion_case_pre("2.3.2-beta.1 ^3.3.2", "null");
+    minversion_case_pre("<3.x", "0.0.0");
+    minversion_case_pre("0.1.1-0", "0.1.1-0");
+    minversion_case_pre("<1.0.x ^ 1.2.3 || 2.3.3 - X", "null");
+    minversion_case_pre("2.1.2-rc.1 || 2.x || >=1.3.2 >=0", "1.3.2");
+    minversion_case_pre("~>2.2.x >3.2.x >=3.2.0 || >1.1.1 ^1.1.x", "1.1.2");
+    minversion_case_pre(">0.2.x || ^0.3.2 ^3.3.1-0", "0.3.0-0");
+    minversion_case_pre("~>1.1.1-beta.1", "1.1.1-beta.1");
+    minversion_case_pre("^3.1 ^3", "3.1.0-0");
+    minversion_case_pre(" 1.2.0", "1.2.0");
+    minversion_case_pre("0.0.1 - 0.2.1 || >=3.2.3 || 2.x", "0.0.1-0");
+    minversion_case_pre("^ 0 <=1.0.0 < x", "null");
+    minversion_case_pre("< 2.1.3 0.1.1", "0.1.1");
+    minversion_case_pre("~1.2 <X <2.0.x", "null");
+    minversion_case_pre(">=3.2.2-alpha || 1.1.1", "1.1.1");
+    minversion_case_pre("<= 0.1.x >=2.0.3", "null");
+    minversion_case_pre("2.1", "2.1.0-0");
+    minversion_case_pre("0.0.1 - X", "0.0.1-0");
+    minversion_case_pre("<0.3.1 <* =0.1.0-rc.1", "null");
+    minversion_case_pre("2.1.0 - 2.0", "null");
+    minversion_case_pre("~2.1.0-rc.1", "2.1.0-rc.1");
+    minversion_case_pre(">3 <= 3 > 3.0.x", "null");
+    minversion_case_pre(">=* ^ 2 =0.x", "null");
+    minversion_case_pre("<=3", "0.0.0");
+    minversion_case_pre("*", "0.0.0");
+    minversion_case_pre("<1.0.1 ~>3.3 1.3.1 || <2.3 <=2.x || >2.3.0 =* ^3.3.0", "0.0.0");
+    minversion_case_pre("^3.1.1 ^2.0.x ~>2.0.3", "null");
+    minversion_case_pre("2 - 2.0.2", "2.0.0-0");
+    minversion_case_pre("0.1.3 || 2 - 1.0.2 || >=3.2.1", "0.1.3");
+    minversion_case_pre("1 ^1.3.3 >=0", "1.3.3");
+    minversion_case_pre("", "0.0.0");
+    minversion_case_pre("=1.x <3.0.x ~>3.3.2-0", "null");
+    minversion_case_pre("1.0 ~>3.1.0-beta.1 <=2.x", "null");
+    minversion_case_pre("~>1.1.0", "1.1.0");
+    minversion_case_pre("*", "0.0.0");
+    minversion_case_pre("<= 1.x || 0.3.0 - 0", "0.0.0");
+    pair_case_pre("=1.0.2 * >=0.0.0", "*", true, true);
+    pair_case_pre("0.3.2-alpha - 2.1.1", "*", true, true);
+    pair_case_pre("~>1.x =X ~3.0.2", ">3.3.x", false, true);
+    pair_case_pre(">=3 || =0.1 ^0.3.x || > X <3.2.1", "0.3.x", false, false);
+    pair_case_pre("0.0.x - 3.1.0", "", true, true);
+    pair_case_pre("^1.3", "*", true, true);
+    pair_case_pre("0.3.3 >=0.1.2-alpha =2.x", "~>3.0", false, true);
+    pair_case_pre(">0.3.0-rc.1 2.3.0 || ~1.2.x ~>2 3.2.3 || ~>3.3.0 <=2.1.0-alpha", "^2.x >1.2.2", true, false);
+    pair_case_pre("~>1", "<0.2.3-alpha <=2.0.2 >3.1.2 || ^3.2.3 ^1", false, false);
+    pair_case_pre("", "1.2.3 || ^0.3.0-rc.1", true, false);
+    pair_case_pre("0 ~>0.0 <3.2.3", "<=2.0 ~1.3 = 3.0.0-alpha || ~>1.2.2-alpha =X 3.2.1", false, false);
+    pair_case_pre("2.x - 3.0.3 || 2.2.1 >=0.x ~x", "x - 0.0.0-rc.1 || <0.0.x ^1.3.2", false, false);
+    pair_case_pre("<0.x >2 2.1.3", ">=2.3.3", false, false);
+    pair_case_pre("2.3 - 2.x", " 3.3 >1 <2.2.3", false, false);
+    pair_case_pre(">1.1.3", "~2.x 1.3.x ~0 || <1.2.2-alpha", true, false);
+    pair_case_pre("*", "0.3.1 3.2.3 ^ 1.3.x || ~1.1.2 <=x", true, false);
+    pair_case_pre("=3.1.1 ~>2.2.0 || >=0.0.x 1.1.3 || 1.3.0-rc.1", ">3.0.2 3.2.x 3.x", false, false);
+    pair_case_pre("*", "^1.0.x ^1.0.2", true, false);
+    pair_case_pre("=0.1.1 ~3.3.2", "2.x ~>3.0.3 <=2.3.2", false, true);
+    pair_case_pre("<0.3.3 || >=0.3.2 =1.3.3-alpha >0.2.x || > 1.2.3 x", "^2.2.2-0 ~>0.1.2 >3.2.1 || ^2.1.2 ^0.3.0", false, false);
+    pair_case_pre("*", "*", true, true);
+    pair_case_pre(">=1.3 <=0.3.3 ^1.0.1-alpha || ^0.x ~>3.1.3 ~>0.1", "^2 <=X", false, true);
+    pair_case_pre("* ^2.2.3 =0.2.0-alpha", ">=0.1.2 ~>0.2.x >3.x", false, true);
+    pair_case_pre("=3.3.1 ^x", "*", true, true);
+    pair_case_pre(">1.1.1", "^3.0.1 <=2.3.3-alpha", false, false);
+    pair_case_pre("<= 2 >=2.0.x", ">x >=*", false, false);
+    pair_case_pre("0.0 1.0.2-rc.1 ~2.2.0", ">=2 ^1.x 0.0", false, true);
+    pair_case_pre(">3.0.1", "~1.x ~3.0.1", false, false);
+    pair_case_pre(">1.2.0-0 ^2.3.3 ~>1.0.1-0 || 3.3.2-0 ^x", "*", true, true);
+    pair_case_pre(" 0.1.2 ~> 2.0.0-rc.1", "~* =1.x ^0.1.2", false, true);
+    pair_case_pre("x *", "~>3.0.x ~>1.0.x", false, false);
+    pair_case_pre("", "0.1.0 - 3.1.x", true, false);
+    pair_case_pre("<=1", "2.0.2 >=0.2.3 || 0.2.3 - 2.3.1 || <x ~1 ^2", true, false);
+    pair_case_pre("0.1.1 - 0.2.2 || ~>x 3.0.3 <1.1.2-alpha", "^3.0.3 || ^*", true, true);
+    pair_case_pre("^0.1", ">3.0.0-rc.1 <=0.2 || 1.0.x =1 ^2.2.x", false, false);
+    pair_case_pre("2  2.2.x >=2.x || * ^0.2.2", ">2.2.2", true, false);
+    pair_case_pre("^*", "^2.2.0 1.3.0", false, false);
+    pair_case_pre(">=1.0.1-beta.1", "~>2.0.x <=1 >1.1.1", false, false);
+    pair_case_pre("~0 || x || =0.0.x 3.0", "", true, true);
+    pair_case_pre("~1.3.0-alpha", ">=X >=2.1.3", false, false);
+    pair_case_pre("", "^X <=0 <=1.x", true, false);
+    pair_case_pre("*", "<1.3.2 ~>x || ~2.2", true, false);
+    pair_case_pre("~>x >=2.2.3-rc.1 1.2.0-alpha", "2.1.x - 2.x", false, true);
+    pair_case_pre("=2.0.1-rc.1 ~0", ">*", false, true);
+    pair_case_pre(">=0.3 X", "2.0.2-beta.1 ~>0.1.2 *", false, false);
+    pair_case_pre("=0.3.3 ^2.x ^ 3.3.3", "2.0 =1.2.3 ^2.2.x", false, true);
+    pair_case_pre("~* 3.3.x", "<=0.0", false, false);
+    pair_case_pre("1.0.0 - 2.x", " x 2.x  2.x", true, false);
+    pair_case_pre(">= 1.2.0 || 3.0.3-alpha - 2.1.1-rc.1 || 3.x =1.0.0 >=1.0.0", "1.0.x", false, false);
+    pair_case_pre("X", "= 3.2.2 =1 || 1.x - 2 || ~0.3.x ^0.1.2 ~>*", true, false);
+    pair_case_pre("^0.1", "~>2.1.2 || ~1.0 ~>3 ^1.0.2", false, false);
+    pair_case_pre(">=2.1.3 || ^1.2 <3.0.0-alpha", "2.3.3 - 2.3 || ^1.x X =* || ^ 3.3", true, false);
+    pair_case_pre("<1.0.2", "=X", true, true);
+    pair_case_pre("", "1.1.0-0 ^x || 3.x", true, false);
+    pair_case_pre("<=2.0", "^2.3.1-beta.1 || >2.3.3-0 2.1.1 2.0.1", false, false);
+    pair_case_pre("1.3.0 - X || >1 >3.3.x || 0 - x", "<=1 || ~>3.x * >1 || 3.x - X", true, false);
+    pair_case_pre("0.3.2 - 3.3.3 || ^ 1.0.3", "3 <3.1.x", true, false);
+    pair_case_pre("0", "2.0.0 - 0.2.1 || ~2.0.3 >2.2.x =2.2 || ^1.2.1", false, false);
+    pair_case_pre("2.1.x || ^x 2.x =1.1.3 || =1.2.0 >=3.2.1", " * ~>1.x =3.0.3", false, false);
+    pair_case_pre(">=3.0.1 || <= 3.1.1 =X <=0.x || x", "~>2.2 <=3.2.1", true, false);
+    comparators_case_pre("3.1.0 - 2 || >0.3.1", ">=3.1.0-0 <3.0.0-0|>0.3.1");
+    comparators_case_pre("~>1.1.x", ">=1.1.0 <1.2.0-0");
+    comparators_case_pre("^3.2.1 <1.0.3 >=1.1.2-rc.1", ">=3.2.1 <4.0.0-0 <1.0.3 >=1.1.2-rc.1");
+    comparators_case_pre("*", "");
+    comparators_case_pre("", "");
+    comparators_case_pre("^1.0.3 3.1.1-beta.1 ~>3.3.0 || ~>2.2.2 ^0.1 = 0.0.1-rc.1 || >X ^3.2  0.2.1", ">=1.0.3 <2.0.0-0 3.1.1-beta.1 >=3.3.0 <3.4.0-0|>=2.2.2 <2.3.0-0 >=0.1.0-0 <0.2.0-0 0.0.1-rc.1");
+    comparators_case_pre("=3", ">=3.0.0-0 <4.0.0-0");
+    comparators_case_pre("2.x <3.x", ">=2.0.0-0 <3.0.0-0");
+    comparators_case_pre("*", "");
+    comparators_case_pre(">=1.3 || 0.2.3 - 1.x", ">=1.3.0-0|>=0.2.3-0 <2.0.0-0");
+    comparators_case_pre("", "");
+    comparators_case_pre(">3.1.2-alpha || =X <=3.1.0-alpha <=2 || 0.0.3 - 2.x", ">3.1.2-alpha|<=3.1.0-alpha <3.0.0-0|>=0.0.3-0 <3.0.0-0");
+    comparators_case_pre("3.2.2 || <3.1.2", "3.2.2|<3.1.2");
+    comparators_case_pre(">x 2.2.3 3.0.2-rc.1", "<0.0.0-0");
+    comparators_case_pre(">=2.3.x =3.0.1 >=1.2.x || ^ 3.1.1 <3.3.3 ~2.0", ">=2.3.0-0 3.0.1 >=1.2.0-0|>=3.1.1 <4.0.0-0 <3.3.3 >=2.0.0 <2.1.0-0");
+    comparators_case_pre("* || 3 || <3.0.3", "");
+    comparators_case_pre("^3.3 || ^2.x ~2.1", ">=3.3.0-0 <4.0.0-0|>=2.0.0-0 <3.0.0-0 >=2.1.0 <2.2.0-0");
+    comparators_case_pre("<=X <3.x ~ 1.3", "<3.0.0-0 >=1.3.0 <1.4.0-0");
+    comparators_case_pre("*", "");
+    comparators_case_pre(">3.x || =1 2.x <x", ">=4.0.0-0");
+    comparators_case_pre("1.1 - 0.2", ">=1.1.0-0 <0.3.0-0");
+    comparators_case_pre("*", "");
+    comparators_case_pre(">=3.x || ^3.x", ">=3.0.0-0|>=3.0.0-0 <4.0.0-0");
+    comparators_case_pre("*", "");
+    comparators_case_pre("*", "");
+    comparators_case_pre("*", "");
+    comparators_case_pre("0.0.1 >0.2.0 || <3.3.1 * <2.3.x || 1.2.x =2.2.1 ^2.3.0", "0.0.1 >0.2.0|<3.3.1 <2.3.0-0|>=1.2.0-0 <1.3.0-0 2.2.1 >=2.3.0 <3.0.0-0");
+    comparators_case_pre(">2.2.x >=3 <3.2.0 || ^ 3 ~>0.1.x ^0.0 || 2.1.3 ^0.0.0-beta.1 <1.0.2", ">=2.3.0-0 >=3.0.0-0 <3.2.0|>=3.0.0-0 <4.0.0-0 >=0.1.0 <0.2.0-0 <0.1.0-0|2.1.3 >=0.0.0-beta.1 <0.0.1-0 <1.0.2");
+    comparators_case_pre("3.2", ">=3.2.0-0 <3.3.0-0");
+    comparators_case_pre("^3.3.0", ">=3.3.0 <4.0.0-0");
+    simplify_case_pre("0.2.0-rc.1.2 0.3.0 1.2.1", "<= 2.3.3 <2 ~>1.1", "");
+    simplify_case_pre("2.2.2", "=0.3.1-alpha", "");
+    simplify_case_pre("0.3.1-0 1.0.0-alpha 1.0.1 1.0.2 2.3.1", "^2.x <0.3.x 2.0.1", "");
+    simplify_case_pre("2.1.0-beta.1 2.1.3-beta.1 2.1.3 2.3.2-rc.1.2", "^ 1.0 ^1.3.3", "");
+    simplify_case_pre("1.2.1-beta.1", "=0.x || >= 3.2 =2.3.x", "");
+    simplify_case_pre("1.1.3-beta.1 1.3.3-beta.1 2.0.0-beta.1", "^3.0.3-alpha  2.2.3 || 1 || <2.x", "<=1.3.3-beta.1");
+    simplify_case_pre("0.0.2 1.1.3 1.2.1 1.3.1-rc.1.2 1.3.2 2.3.0", "^0.x >=3.2.0 ~2.3.1", "");
+    simplify_case_pre("0.2.0 0.3.2-beta.1 1.2.1 1.3.1 2.3.3-0", ">=3.2 =2.1.x || 2.2.1 - x || * - 0.2.0", "0.2.0 || >=2.3.3-0");
+    simplify_case_pre("0.1.2-0 0.2.2 0.2.3-rc.1.2 0.3.2-beta.1 1.1.0-0", ">1.x || <3.0.x", "*");
+    simplify_case_pre("1.1.2 1.2.1-alpha 2.0.0-1 2.1.3-1 2.2.2-alpha 2.3.2-0", "^0.2.0 ~X >=0.x || 3.x >=3.1.x ~>2.0.1-0 || >=X", "*");
+    simplify_case_pre("0.2.0 0.3.2-rc.1.2 0.3.3-0 1.3.0 2.0.2 2.0.3 2.2.3-alpha", "*", "*");
+    simplify_case_pre("2.1.0", "^1.x ~3.0.2 || ~> 3 || * - 0.2", "");
+    simplify_case_pre("1.2.1 2.2.0-beta.1", "0.1.1", "");
+    simplify_case_pre("0.1.0-0 1.1.3-beta.2 1.2.3-0 1.3.3 1.3.3 2.1.1-rc.1.2", "", "");
+    simplify_case_pre("0.0.1-1 2.1.0-rc.1.2 2.1.3-0 2.2.1-beta.1 2.3.1", "", "");
+    simplify_case_pre("0.0.3-beta.1 0.2.2 1.0.3-rc.1.2 1.1.3-beta.2 1.2.1-beta.2 1.3.2-rc.1.2", "3.0.2-alpha 3.2.2-rc.1 1.1.3-0", "");
+    simplify_case_pre("0.3.1-rc.1.2 2.1.3 2.2.2-beta.1", "~1.1.1 ^2.x", "");
+    simplify_case_pre("0.1.0-1 1.0.3-rc.1.2 2.0.1-beta.2 2.0.3", "~>x ~>2.2.0-0 <1.2.3-rc.1", "");
+    simplify_case_pre("0.2.3 1.0.0-0 1.2.1-alpha 2.0.1-beta.1 2.1.2-beta.1 2.2.3-alpha", "<0.x <0.x ^ 1.1.2 || =1 ^3.2.3-0 <=0 || ^1.3 ~>* > 3.1.1", "");
+    simplify_case_pre("0.0.0-0 1.0.2 1.2.1 1.3.0", "", "");
+    simplify_case_pre("0.0.2 1.1.2-alpha 1.1.3-beta.1 1.2.3-beta.2", " 1.2", " 1.2");
+    simplify_case_pre("0.1.2-alpha 0.2.1 0.2.3-rc.1.2 1.3.1-1 2.3.3", "^1 ^ 0.2.x 0.3.x", "");
+    simplify_case_pre("0.3.3-alpha", "*", "*");
+    simplify_case_pre("0.1.1-beta.1 0.2.2-0 0.2.2 2.0.1-rc.1.2 2.0.2 2.2.1-beta.2", ">3.0.x 3.2.3-0", "");
+    simplify_case_pre("1.1.3-rc.1.2", "=0.1.2-alpha", "");
+    simplify_case_pre("0.2.2 0.3.0-rc.1.2 1.0.1-1 1.1.2-beta.1 1.2.1 1.3.3 2.1.3", "3.3.1", "");
+    simplify_case_pre("0.0.1-1", ">1.1.1 0.3.1-rc.1 || <3", "*");
+    simplify_case_pre("0.1.1-beta.1 0.2.0-0 1.1.1-1 1.2.1-0 1.3.1-0 2.1.1-beta.2", ">=2 <=1.0", "");
+    simplify_case_pre("0.0.2-alpha 0.0.3-alpha 0.1.0-1 1.0.2-0", "<3.1.1-beta.1", "*");
+    simplify_case_pre("1.2.0-beta.1 2.3.2-beta.1", "~3.3.0 || =0.1  X", "");
+}
+
+fn range_case(text: const u8[:], want: const u8[:]) {
+    var out: u8[>..] = [];
+    if want == "null" {
+        assert(!semver::valid_range(out, text));
+    } else {
+        assert(semver::valid_range(out, text));
+        assert(out[..] == want);
+    }
+}
+
+fn check_range_dedup() {
+    range_case("~1.x ~1.x||>=3||>0.3.0-beta.1 <1.2.1 <=1.1.0-rc.1 <=1.1.0-rc.1", ">=1.0.0 <2.0.0-0||>=3.0.0||>0.3.0-beta.1 <1.2.1 <=1.1.0-rc.1");
+    range_case(">=x <=0.0.0 <=0.0.0 >=0.0.1 >=0.0.1||>=x <=0.0.0 <=0.0.0 >=0.0.1 >=0.0.1||<0.1.x ^1.0.0 ^1.0.0 ^3||~X ~X <0.2.3 <0.2.3 >=1.1.2", "<=0.0.0 >=0.0.1||<=0.0.0 >=0.0.1||<0.1.0-0 >=1.0.0 <2.0.0-0 >=3.0.0 <4.0.0-0||<0.2.3 >=1.1.2");
+    range_case("=0.1.x =0.1.x >1.x =2.1.2-alpha =2.1.2-alpha||<=2.1.x <=1.1.3 =1.3.3-beta.1 =1.3.3-beta.1||0.0.1 >X 1 1", ">=0.1.0 <0.2.0-0 >=2.0.0 2.1.2-alpha||<2.2.0-0 <=1.1.3 1.3.3-beta.1");
+    range_case(">2.x ^3.3 ^3.3||>3.x >3.x ~3.1.0 ~3.1.0 <0.3.3||>2.0.0 >2.0.0 ~1.3.1-beta.1 ~1.3.1-beta.1 ^1.1.2 ^1.1.2", ">=3.0.0 >=3.3.0 <4.0.0-0||>=4.0.0 >=3.1.0 <3.2.0-0 <0.3.3||>2.0.0 >=1.3.1-beta.1 <1.4.0-0 >=1.1.2 <2.0.0-0");
+    range_case("=x X||=x X||<3.3.3-0 >=2.0.1-0||2.2.1 3.3.0 3.3.0 3.2.2 3.2.2", "*");
+    range_case("2.3.x >=3.x ^0||<=3.0 <=3.0||<=3.0 <=3.0||>=0.0.0", "*");
+    range_case("~2.1.x||~2.1.x", ">=2.1.0 <2.2.0-0||>=2.1.0 <2.2.0-0");
+    range_case("<=0 ~2.0.2 ~2.0.2 >2.3.x||<=0 ~2.0.2 ~2.0.2 >2.3.x||=1.1.0-alpha||=1.1.0-alpha", "<1.0.0-0 >=2.0.2 <2.1.0-0 >=2.4.0||<1.0.0-0 >=2.0.2 <2.1.0-0 >=2.4.0||1.1.0-alpha||1.1.0-alpha");
+    range_case("^3.2.x <=1.2.1 <=1.2.1 ^2||^3.2.x <=1.2.1 <=1.2.1 ^2||>=1.0.0 >=1.0.0 <=3.3.1-beta.1", ">=3.2.0 <4.0.0-0 <=1.2.1 >=2.0.0 <3.0.0-0||>=3.2.0 <4.0.0-0 <=1.2.1 >=2.0.0 <3.0.0-0||>=1.0.0 <=3.3.1-beta.1");
+    range_case("1.3.2 1.3.2 >=2.0.3-alpha >=2.0.3-alpha||2.0.1-rc.1||2.0.1-rc.1||>=3.x", "1.3.2 >=2.0.3-alpha||2.0.1-rc.1||2.0.1-rc.1||>=3.0.0");
+    range_case("=0.1.0||^0.0.3 ^0.0.3 >=0.1 >=0.1||>=1.3", "0.1.0||>=0.0.3 <0.0.4-0 >=0.1.0||>=1.3.0");
+    range_case("<=2.0.2 <=2.0.2 ~1.1 >3", "<=2.0.2 >=1.1.0 <1.2.0-0 >=4.0.0");
+    range_case("=2.1||^3.x ^3.x <=3.1.1", ">=2.1.0 <2.2.0-0||>=3.0.0 <4.0.0-0 <=3.1.1");
+    range_case("<1.2.1||^0.3.3 ^0.3.3 0.0.1 0.0.1 <2.x", "<1.2.1||>=0.3.3 <0.4.0-0 0.0.1 <2.0.0-0");
+    range_case("<3.0 <3.0 <* <=2.3.3 <=2.3.3||~0.1.1 ~0.2.2 <=3.3.2||>0.1 <=X <=2.x", ">=0.1.1 <0.2.0-0 >=0.2.2 <0.3.0-0 <=3.3.2||>=0.2.0 <3.0.0-0");
+    range_case("^2 ^2 ~2.3.3-rc.1 >=1.3.x||=1.1.1-beta.1 =0", ">=2.0.0 <3.0.0-0 >=2.3.3-rc.1 <2.4.0-0 >=1.3.0||1.1.1-beta.1 <1.0.0-0");
+    range_case("~2 ~2 >3.0.3 >3.0.3 1.x 1.x||~2 ~2 >3.0.3 >3.0.3 1.x 1.x||^2.2.2 ^2.1.0 ^2.1.0 X||>=1 >=1", ">=2.0.0 <3.0.0-0 >3.0.3 >=1.0.0 <2.0.0-0||>=2.0.0 <3.0.0-0 >3.0.3 >=1.0.0 <2.0.0-0||>=2.2.2 <3.0.0-0 >=2.1.0||>=1.0.0");
+    range_case(">=0 >=0 0.3.x ^x||>=0 >=0 0.3.x ^x||<=0.0 <1.0.1||<=0.0 <1.0.1", ">=0.3.0 <0.4.0-0||>=0.3.0 <0.4.0-0||<0.1.0-0 <1.0.1||<0.1.0-0 <1.0.1");
+    range_case(">1.3.1 >1.3.1 =0.3.x <0.1 <0.1||>1.3.1 >1.3.1 =0.3.x <0.1 <0.1||=1.3.1 <3.3.2 <1.0.1", ">1.3.1 >=0.3.0 <0.4.0-0 <0.1.0-0||>1.3.1 >=0.3.0 <0.4.0-0 <0.1.0-0||1.3.1 <3.3.2 <1.0.1");
+    range_case(">=1.3.1||~2.1 ~2.1 >0.3.2 2.1.1 2.1.1||~2.1 ~2.1 >0.3.2 2.1.1 2.1.1||^1.2.0", ">=1.3.1||>=2.1.0 <2.2.0-0 >0.3.2 2.1.1||>=2.1.0 <2.2.0-0 >0.3.2 2.1.1||>=1.2.0 <2.0.0-0");
+    range_case("<=0.0.x >0.3.x >0.3.x ^2.3.x||<=0.0.x >0.3.x >0.3.x ^2.3.x||>=0.3.x <X >0.3.1||>=3.0.0-alpha ~1", "<0.1.0-0 >=0.4.0 >=2.3.0 <3.0.0-0||<0.1.0-0 >=0.4.0 >=2.3.0 <3.0.0-0||>=3.0.0-alpha >=1.0.0 <2.0.0-0");
+    range_case(">3.x <1.2 <1.2 <3.0.x||0.0.2 ^3.2 <=3.0.2 <=3.0.2||0.0.2 ^3.2 <=3.0.2 <=3.0.2||1 <=2.2", ">=4.0.0 <1.2.0-0 <3.0.0-0||0.0.2 >=3.2.0 <4.0.0-0 <=3.0.2||0.0.2 >=3.2.0 <4.0.0-0 <=3.0.2||>=1.0.0 <2.0.0-0 <2.3.0-0");
+    range_case("~2.3.x ^1.3.1||<0.3.0||<0.3.0||~x ~x", "*");
+    range_case("^2.2.x||=2.0.0 =2.0.0 >0.2.2||<0.0.0", ">=2.2.0 <3.0.0-0||2.0.0 >0.2.2||<0.0.0");
+    range_case("<=2.0.0 0.2 0.2||<=2.0.0 0.2 0.2||~1.x x", "<=2.0.0 >=0.2.0 <0.3.0-0||<=2.0.0 >=0.2.0 <0.3.0-0||>=1.0.0 <2.0.0-0");
+    range_case("2.3 ^0.2.0||^2.1.1 ^2.1.1 <=3.0.0", ">=2.3.0 <2.4.0-0 >=0.2.0 <0.3.0-0||>=2.1.1 <3.0.0-0 <=3.0.0");
+    range_case(">=1.2.3", ">=1.2.3");
+    range_case("3.0 ^2.1.3-alpha ^2.1.3-alpha <1.x||<0.1 >0.x <=0.x", ">=3.0.0 <3.1.0-0 >=2.1.3-alpha <3.0.0-0 <1.0.0-0||<0.1.0-0 >=1.0.0 <1.0.0-0");
+    range_case("2.3.0-beta.1 >2.3.1 >2.3.1 =2.1.3 =2.1.3||<0.1.2||<0.1.2", "2.3.0-beta.1 >2.3.1 2.1.3||<0.1.2||<0.1.2");
+    range_case("<=0.1.0-rc.1 <=0.1.0-rc.1 ~1.0.0||~2.3 ~2.3 <2.0||~2.3 ~2.3 <2.0||=x =x 0.2.x ~0.0.0-0 ~0.0.0-0||=x =x 0.2.x ~0.0.0-0 ~0.0.0-0", "<=0.1.0-rc.1 >=1.0.0 <1.1.0-0||>=2.3.0 <2.4.0-0 <2.0.0-0||>=2.3.0 <2.4.0-0 <2.0.0-0||>=0.2.0 <0.3.0-0 >=0.0.0-0 <0.1.0-0||>=0.2.0 <0.3.0-0 >=0.0.0-0 <0.1.0-0");
+    range_case("~x ~x||1.0 =1.2.x >=1.3.3 >=1.3.3||>0.x >0.x||>0.x >0.x", "*");
+    range_case("<=x <1.1||>3.3||>3.x <0.1.2 >0.1.x", "<1.1.0-0||>=3.4.0||>=4.0.0 <0.1.2 >=0.2.0");
+    range_case("1.1.2||>=0.2.1 >=3.x <x||>=0.2.1 >=3.x <x||1.0.2 1.0.2 =0.2.x", "1.1.2||1.0.2 >=0.2.0 <0.3.0-0");
+    range_case("<3.1||<3.1||>=1.2.0||1.x 1.x ~3.3.0-beta.1", "<3.1.0-0||<3.1.0-0||>=1.2.0||>=1.0.0 <2.0.0-0 >=3.3.0-beta.1 <3.4.0-0");
+    range_case("1.1.1 1.1.1||>=3.1.x <=0.2.1||>=3.1.x <=0.2.1||~X <1.0.3 <1.0.3 0", "1.1.1||>=3.1.0 <=0.2.1||>=3.1.0 <=0.2.1||<1.0.3 <1.0.0-0");
+    range_case("~2.2.x 2 >=1.0.0||^* >2.3.2 3.3.3||^0.2.x ^0.2.x <=2.0.0 <=X||^0.2.x ^0.2.x <=2.0.0 <=X", ">=2.2.0 <2.3.0-0 >=2.0.0 <3.0.0-0 >=1.0.0||>2.3.2 3.3.3||>=0.2.0 <0.3.0-0 <=2.0.0||>=0.2.0 <0.3.0-0 <=2.0.0");
+    range_case("<3.x <3.x", "<3.0.0-0");
+    range_case(">=1.2 <=* <=* <1.x", ">=1.2.0 <1.0.0-0");
+    range_case("=3.3.1||1 1 ~*", "3.3.1||>=1.0.0 <2.0.0-0");
+    range_case("^0.2 ^0.2", ">=0.2.0 <0.3.0-0");
+    range_case("~1.0.2-rc.1 <=3 <=3 =0.2 =0.2||~1.0.2-rc.1 <=3 <=3 =0.2 =0.2||~1.3.2 ~* ~*||~1.3.2 ~* ~*||^1.2", ">=1.0.2-rc.1 <1.1.0-0 <4.0.0-0 >=0.2.0 <0.3.0-0||>=1.0.2-rc.1 <1.1.0-0 <4.0.0-0 >=0.2.0 <0.3.0-0||>=1.3.2 <1.4.0-0||>=1.3.2 <1.4.0-0||>=1.2.0 <2.0.0-0");
+    range_case(">0.0 <1 <1 2.0.0-rc.1 2.0.0-rc.1||>0.2.1 >=3.x >=3.x ~1.3 ~1.3||2.2.x", ">=0.1.0 <1.0.0-0 2.0.0-rc.1||>0.2.1 >=3.0.0 >=1.3.0 <1.4.0-0||>=2.2.0 <2.3.0-0");
+    range_case("<X <X >1.x >1.x =0.0.0-beta.1||=3.2.x >=2 1.1.2||<2.1.2 ^1 ^1", ">=3.2.0 <3.3.0-0 >=2.0.0 1.1.2||<2.1.2 >=1.0.0 <2.0.0-0");
+    range_case("=3.1.0 =1.2.2 =1.2.2 >=2.3", "3.1.0 1.2.2 >=2.3.0");
+    range_case("<2.2.3 ~1.0.3 3", "<2.2.3 >=1.0.3 <1.1.0-0 >=3.0.0 <4.0.0-0");
+    range_case("<=1.0 ^* <0.1.1 <0.1.1||=0.2.1 <0.2.1-0 <0.2.1-0 >=0 >=0||=0.2.1 <0.2.1-0 <0.2.1-0 >=0 >=0", "<1.1.0-0 <0.1.1||0.2.1 <0.2.1-0||0.2.1 <0.2.1-0");
+    range_case(">X ~2.x||=2.0.2 <=2.0.2 <=2.0.2 =0.3.2 =0.3.2||>0.0.0 <=3.0.0 <=3.0.0 2", "2.0.2 <=2.0.2 0.3.2||>0.0.0 <=3.0.0 >=2.0.0 <3.0.0-0");
+    range_case("~2.0.1-beta.1 ~2.0.1-beta.1 1.2.x", ">=2.0.1-beta.1 <2.1.0-0 >=1.2.0 <1.3.0-0");
+    range_case("<=1.1 <=1.1||<3.x >=3 >1.2 >1.2||=3.0.3 =2.2 =2.2 >3.2.2-rc.1 >3.2.2-rc.1", "<1.2.0-0||<3.0.0-0 >=3.0.0 >=1.3.0||3.0.3 >=2.2.0 <2.3.0-0 >3.2.2-rc.1");
+    range_case("<1.0 <=x <=x||>=1.1.3 >=1.1.3 ~X >=0 >=0", "<1.0.0-0||>=1.1.3");
+    range_case("^1.3.2-rc.1 ^1.3.2-rc.1 =2.x =2.x||<=2.1.3 >=0.1.1 >=0.1.1||<2.0.0 <2.0.0 ^X =1.3.2 =1.3.2", ">=1.3.2-rc.1 <2.0.0-0 >=2.0.0 <3.0.0-0||<=2.1.3 >=0.1.1||<2.0.0 1.3.2");
+    range_case("=0.0.3 =0.0.3 <=3.3.3-alpha ~1.x", "0.0.3 <=3.3.3-alpha >=1.0.0 <2.0.0-0");
+    range_case("<1.3.0-0 <1.3.0-0 >2.x >2.x >=0.0.0||<1.3.0-0 <1.3.0-0 >2.x >2.x >=0.0.0", "<1.3.0-0 >=3.0.0||<1.3.0-0 >=3.0.0");
+    range_case("=0||<=2.3.x >=2.x >=2.x ~2.2.1||<=0.1.2 <=1.2.2 ^3.2.0||<=0.1.2 <=1.2.2 ^3.2.0", "<1.0.0-0||<2.4.0-0 >=2.0.0 >=2.2.1 <2.3.0-0||<=0.1.2 <=1.2.2 >=3.2.0 <4.0.0-0||<=0.1.2 <=1.2.2 >=3.2.0 <4.0.0-0");
+    range_case("<=2.1.1-alpha", "<=2.1.1-alpha");
+    range_case("<=0.0.x ^0.2.3 3.0.1||<0.1.3 <3.2||0.3.3 0.3.3 >=1 0.0.0", "<0.1.0-0 >=0.2.3 <0.3.0-0 3.0.1||<0.1.3 <3.2.0-0||0.3.3 >=1.0.0 0.0.0");
+    range_case("~0 <3.0.x >=1.3.3||>2.0.3 >2.0.3||>2.0.3 >2.0.3", "<1.0.0-0 <3.0.0-0 >=1.3.3||>2.0.3||>2.0.3");
+    range_case("=3.1.2||=3.1.2||2.2 2.0.x||2.2 2.0.x||<=2.x <=2.x <1.x >=*", "3.1.2||3.1.2||>=2.2.0 <2.3.0-0 >=2.0.0 <2.1.0-0||>=2.2.0 <2.3.0-0 >=2.0.0 <2.1.0-0||<3.0.0-0 <1.0.0-0");
+    range_case("<1.x||^X", "*");
+    range_case(">=0 >=1.0 >=1.0||^1.2.1 <=0.3 ^3.1.1 ^3.1.1||^1.2.1 <=0.3 ^3.1.1 ^3.1.1", ">=1.0.0||>=1.2.1 <2.0.0-0 <0.4.0-0 >=3.1.1 <4.0.0-0||>=1.2.1 <2.0.0-0 <0.4.0-0 >=3.1.1 <4.0.0-0");
 }

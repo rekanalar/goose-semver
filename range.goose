@@ -199,16 +199,8 @@ fn rsort(order: i64[>..]&, versions: const u8[:][:]) {
 
 // ---- reading a range -----------------------------------------------------
 
-// is_null_text tells whether a set is the null set.
-fn is_null_text(set: const u8[:]) -> bool {
-    let w = words(set);
-    return w.len == 1 && w[0] == "<0.0.0-0";
-}
-
-// add_set reads one set of strict comparators into comps. It drops a
-// comparator that repeats an earlier one of the same set.
+// add_set reads one set of strict comparators into comps.
 fn add_set(comps: Comparator[>..]&, set: const u8[:]) -> bool {
-    let first: i64 = comps.len;
     let toks = words(set);
     if toks.len == 0 {
         comps.push(make_comp(OP_ANY, zero_version()));
@@ -218,14 +210,7 @@ fn add_set(comps: Comparator[>..]&, set: const u8[:]) -> bool {
         let _, o = split_op(tok);
         let v, ok = parse(tok[o.len..]);
         if !ok { return false; }
-        let code = op_code(o);
-        var dup = false;
-        var i: i64 = first;
-        while i < comps.len {
-            if comps[i].op == code && compare(comps[i].v, v) == 0 { dup = true; }
-            i += 1;
-        }
-        if !dup { comps.push(make_comp(code, v)); }
+        comps.push(make_comp(op_code(o), v));
     }
     return true;
 }
@@ -235,11 +220,12 @@ fn add_set(comps: Comparator[>..]&, set: const u8[:]) -> bool {
 // comparators from ends[i - 1] up to ends[i]. It gives false for a bad
 // range, a range above MAX_RANGE_BYTES, or more than MAX_ALTERNATIVES sets.
 //
-// The sets follow npm Range. A null set is dropped when another set stays.
-// A range that matches every release is one set with one OP_ANY.
-fn parse_range(norm: u8[>..]&, comps: Comparator[>..]&, ends: i64[>..]&, range: const u8[:]) -> bool {
+// The sets follow npm Range; normalize drops the null sets.
+// A range that matches every release is one set with one OP_ANY. The flag
+// inc reads the range as npm reads it with includePrerelease.
+fn parse_range(norm: u8[>..]&, comps: Comparator[>..]&, ends: i64[>..]&, range: const u8[:], inc: bool) -> bool {
     if range.len > MAX_RANGE_BYTES { return false; }
-    if !normalize(norm, range) { return false; }
+    if !normalize(norm, range, inc) { return false; }
     if norm.len == 0 {
         comps.push(make_comp(OP_ANY, zero_version()));
         ends.push(comps.len);
@@ -247,21 +233,9 @@ fn parse_range(norm: u8[>..]&, comps: Comparator[>..]&, ends: i64[>..]&, range: 
     }
     let sets = split(norm[..], "||");
     if sets.len > MAX_ALTERNATIVES { return false; }
-    var live: i64 = 0;
-    for s in sets { if !is_null_text(s) { live += 1; } }
-    var i: i64 = 0;
-    while i < sets.len {
-        let null_set = is_null_text(sets[i]);
-        // With more than one set, the null sets go. When all are null, the
-        // first stays.
-        var skip = false;
-        if sets.len > 1 && null_set && live > 0 { skip = true; }
-        if sets.len > 1 && live == 0 && i > 0 { skip = true; }
-        if !skip {
-            if !add_set(comps, sets[i]) { return false; }
-            ends.push(comps.len);
-        }
-        i += 1;
+    for set in sets {
+        if !add_set(comps, set) { return false; }
+        ends.push(comps.len);
     }
     return true;
 }
@@ -291,16 +265,16 @@ fn names_tuple(c: Comparator, v: Version) -> bool {
 }
 
 // one_matches tells whether the version fits a range of one comparator.
-fn one_matches(v: Version, c: Comparator) -> bool {
+fn one_matches(v: Version, c: Comparator, inc: bool) -> bool {
     if !comp_hit(v, c) { return false; }
-    if v.pre.len > 0 { return names_tuple(c, v); }
+    if v.pre.len > 0 && !inc { return names_tuple(c, v); }
     return true;
 }
 
 // set_ok tells whether the version fits the set from lo up to hi. A
 // version with a pre-release needs a comparator of its tuple with a
 // pre-release.
-fn set_ok(v: Version, comps: Comparator[>..]&, lo: i64, hi: i64) -> bool {
+fn set_ok(v: Version, comps: Comparator[>..]&, lo: i64, hi: i64, inc: bool) -> bool {
     var pre_ok = false;
     var i = lo;
     while i < hi {
@@ -308,15 +282,15 @@ fn set_ok(v: Version, comps: Comparator[>..]&, lo: i64, hi: i64) -> bool {
         if names_tuple(comps[i], v) { pre_ok = true; }
         i += 1;
     }
-    if v.pre.len > 0 { return pre_ok; }
+    if v.pre.len > 0 && !inc { return pre_ok; }
     return true;
 }
 
 // range_ok tells whether the version fits one set of the range.
-fn range_ok(v: Version, comps: Comparator[>..]&, ends: i64[>..]&) -> bool {
+fn range_ok(v: Version, comps: Comparator[>..]&, ends: i64[>..]&, inc: bool) -> bool {
     var i: i64 = 0;
     while i < ends.len {
-        if set_ok(v, comps, set_start(ends, i), ends[i]) { return true; }
+        if set_ok(v, comps, set_start(ends, i), ends[i], inc) { return true; }
         i += 1;
     }
     return false;
@@ -327,17 +301,17 @@ fn range_ok(v: Version, comps: Comparator[>..]&, ends: i64[>..]&) -> bool {
 // select gives the place of the highest or the lowest version of the list
 // that the range accepts, or -1. An equal version does not replace an
 // earlier one, as in npm.
-fn select(versions: const u8[:][:], range: const u8[:], want_max: bool) -> i64 {
+fn select(versions: const u8[:][:], range: const u8[:], want_max: bool, inc: bool) -> i64 {
     var norm: u8[>..] = [];
     var comps: Comparator[>..] = [];
     var ends: i64[>..] = [];
-    if !parse_range(norm, comps, ends, range) { return -1; }
+    if !parse_range(norm, comps, ends, range, inc) { return -1; }
     var best: i64 = -1;
     var best_v = zero_version();
     var i: i64 = 0;
     while i < versions.len {
         let v, ok = parse(versions[i]);
-        if ok && range_ok(v, comps, ends) {
+        if ok && range_ok(v, comps, ends, inc) {
             if best < 0 {
                 best = i;
                 best_v = v;
@@ -357,13 +331,24 @@ fn select(versions: const u8[:][:], range: const u8[:], want_max: bool) -> i64 {
 // max_satisfying gives the place of the highest version of the list that
 // the range accepts, or -1.
 fn max_satisfying(versions: const u8[:][:], range: const u8[:]) -> i64 {
-    return select(versions, range, true);
+    return select(versions, range, true, false);
+}
+
+// max_satisfying_o is max_satisfying with the options. With the flag
+// the pre-release rule of the range goes off, as npm gives.
+fn max_satisfying_o(versions: const u8[:][:], range: const u8[:], o: RangeOpts) -> i64 {
+    return select(versions, range, true, o.include_prerelease);
 }
 
 // min_satisfying gives the place of the lowest version of the list that
 // the range accepts, or -1.
 fn min_satisfying(versions: const u8[:][:], range: const u8[:]) -> i64 {
-    return select(versions, range, false);
+    return select(versions, range, false, false);
+}
+
+// min_satisfying_o is min_satisfying with the options.
+fn min_satisfying_o(versions: const u8[:][:], range: const u8[:], o: RangeOpts) -> i64 {
+    return select(versions, range, false, o.include_prerelease);
 }
 
 // ---- min_version ---------------------------------------------------------
@@ -384,17 +369,23 @@ fn write_core(out: u8[>..]&, v: Version) {
 // min_version writes the lowest version that the range accepts into out. It
 // gives false, with out untouched, when no version fits.
 fn min_version(out: u8[>..]&, range: const u8[:]) -> bool {
+    return min_version_o(out, range, RangeOpts { .. });
+}
+
+// min_version_o is min_version with the options.
+fn min_version_o(out: u8[>..]&, range: const u8[:], o: RangeOpts) -> bool {
+    let inc = o.include_prerelease;
     var norm: u8[>..] = [];
     var comps: Comparator[>..] = [];
     var ends: i64[>..] = [];
-    if !parse_range(norm, comps, ends, range) { return false; }
+    if !parse_range(norm, comps, ends, range, inc) { return false; }
     let zero = zero_version();
-    if range_ok(zero, comps, ends) {
+    if range_ok(zero, comps, ends, inc) {
         write_core(out, zero);
         return true;
     }
     let zero_pre = Version { major: 0, minor: 0, patch: 0, pre: "0", build: "" };
-    if range_ok(zero_pre, comps, ends) {
+    if range_ok(zero_pre, comps, ends, inc) {
         write_core(out, zero_pre);
         return true;
     }
@@ -422,7 +413,7 @@ fn min_version(out: u8[>..]&, range: const u8[:]) -> bool {
     var text: u8[>..] = [];
     cand_text(text, comps[best]);
     let mv, ok = parse(text[..]);
-    if !ok || !range_ok(mv, comps, ends) { return false; }
+    if !ok || !range_ok(mv, comps, ends, inc) { return false; }
     out.append(text[..]);
     return true;
 }
@@ -463,14 +454,15 @@ fn cand_cmp(a: Comparator, b: Comparator) -> i64 {
 
 // comp_intersects tells whether two comparators can hold for one version.
 // It is the Comparator.intersects of npm, including its order of tests.
-fn comp_intersects(a: Comparator, b: Comparator) -> bool {
+fn comp_intersects(a: Comparator, b: Comparator, inc: bool) -> bool {
     if a.op == OP_ANY { return true; }
-    if a.op == OP_EQ { return one_matches(a.v, b); }
+    if a.op == OP_EQ { return one_matches(a.v, b, inc); }
     if b.op == OP_ANY { return true; }
-    if b.op == OP_EQ { return one_matches(b.v, a); }
+    if b.op == OP_EQ { return one_matches(b.v, a, inc); }
     // Nothing is lower than 0.0.0, so a "<" bound there holds no version.
-    let zero_a = a.op == OP_LT && a.v.major == 0 && a.v.minor == 0 && a.v.patch == 0;
-    let zero_b = b.op == OP_LT && b.v.major == 0 && b.v.minor == 0 && b.v.patch == 0;
+    // With the flag only "<0.0.0-0" counts, as in npm.
+    let zero_a = a.op == OP_LT && a.v.major == 0 && a.v.minor == 0 && a.v.patch == 0 && (!inc || a.v.pre == "0");
+    let zero_b = b.op == OP_LT && b.v.major == 0 && b.v.minor == 0 && b.v.patch == 0 && (!inc || b.v.pre == "0");
     if zero_a || zero_b { return false; }
     let a_up = is_up(a.op);
     let b_up = is_up(b.op);
@@ -488,12 +480,12 @@ fn comp_intersects(a: Comparator, b: Comparator) -> bool {
 // set_satisfiable tells whether one version can fit all comparators of a
 // set. It is the isSatisfiable of npm: the last comparator is tested
 // against the others, then the one before it, and so on.
-fn set_satisfiable(comps: Comparator[>..]&, lo: i64, hi: i64) -> bool {
+fn set_satisfiable(comps: Comparator[>..]&, lo: i64, hi: i64, inc: bool) -> bool {
     var top = hi - 1;
     while top > lo {
         var j = lo;
         while j < top {
-            if !comp_intersects(comps[top], comps[j]) { return false; }
+            if !comp_intersects(comps[top], comps[j], inc) { return false; }
             j += 1;
         }
         top -= 1;
@@ -504,24 +496,30 @@ fn set_satisfiable(comps: Comparator[>..]&, lo: i64, hi: i64) -> bool {
 // intersects tells whether one version can fit both ranges. A bad range
 // gives false.
 fn intersects(a: const u8[:], b: const u8[:]) -> bool {
+    return intersects_o(a, b, RangeOpts { .. });
+}
+
+// intersects_o is intersects with the options.
+fn intersects_o(a: const u8[:], b: const u8[:], o: RangeOpts) -> bool {
+    let inc = o.include_prerelease;
     var na: u8[>..] = [];
     var ca: Comparator[>..] = [];
     var ea: i64[>..] = [];
     var nb: u8[>..] = [];
     var cb: Comparator[>..] = [];
     var eb: i64[>..] = [];
-    if !parse_range(na, ca, ea, a) { return false; }
-    if !parse_range(nb, cb, eb, b) { return false; }
+    if !parse_range(na, ca, ea, a, inc) { return false; }
+    if !parse_range(nb, cb, eb, b, inc) { return false; }
     var sat_b: bool[>..] = [];
     var j: i64 = 0;
     while j < eb.len {
-        sat_b.push(set_satisfiable(cb, set_start(eb, j), eb[j]));
+        sat_b.push(set_satisfiable(cb, set_start(eb, j), eb[j], inc));
         j += 1;
     }
     var i: i64 = 0;
     while i < ea.len {
         let alo = set_start(ea, i);
-        if set_satisfiable(ca, alo, ea[i]) {
+        if set_satisfiable(ca, alo, ea[i], inc) {
             j = 0;
             while j < eb.len {
                 if sat_b[j] {
@@ -530,7 +528,7 @@ fn intersects(a: const u8[:], b: const u8[:]) -> bool {
                     while x < ea[i] && all {
                         var y = set_start(eb, j);
                         while y < eb[j] && all {
-                            if !comp_intersects(ca[x], cb[y]) { all = false; }
+                            if !comp_intersects(ca[x], cb[y], inc) { all = false; }
                             y += 1;
                         }
                         x += 1;
@@ -585,14 +583,17 @@ fn lt_beaten(l: Comparator, c: Comparator) -> bool {
 // simpleSubset of npm. It gives 1 for yes, 0 for no, and 2 for the null set,
 // which npm gives as null. The two lists are work buffers that the call
 // fills.
-fn simple_subset(s: Comparator[>..]&, d: Comparator[>..]&) -> i32 {
-    let min_comp = make_comp(OP_GTE, zero_version());
+fn simple_subset(s: Comparator[>..]&, d: Comparator[>..]&, inc: bool) -> i32 {
+    var min_comp = make_comp(OP_GTE, zero_version());
     if s.len == 1 && s[0].op == OP_ANY {
         if d.len == 1 && d[0].op == OP_ANY { return 1; }
+        // With the flag the lowest bound is ">=0.0.0-0".
+        if inc { min_comp = make_comp(OP_GTE, Version { major: 0, minor: 0, patch: 0, pre: "0", build: "" }); }
         s.clear();
         s.push(min_comp);
     }
     if d.len == 1 && d[0].op == OP_ANY {
+        if inc { return 1; }
         d.clear();
         d.push(min_comp);
     }
@@ -624,10 +625,10 @@ fn simple_subset(s: Comparator[>..]&, d: Comparator[>..]&) -> i32 {
     }
 
     if eq_count == 1 {
-        if has_hi && !one_matches(eq_v, hi_c) { return 2; }
-        if has_lo && !one_matches(eq_v, lo_c) { return 2; }
+        if has_hi && !one_matches(eq_v, hi_c, inc) { return 2; }
+        if has_lo && !one_matches(eq_v, lo_c, inc) { return 2; }
         for c in d {
-            if !one_matches(eq_v, c) { return 0; }
+            if !one_matches(eq_v, c, inc) { return 0; }
         }
         return 1;
     }
@@ -636,8 +637,9 @@ fn simple_subset(s: Comparator[>..]&, d: Comparator[>..]&) -> i32 {
     var has_dom_lt = false;
     // A bound with a pre-release needs a comparator of its tuple with a
     // pre-release in the other set.
-    var need_gt = has_hi && hi_c.v.pre.len > 0;
-    var need_lt = has_lo && lo_c.v.pre.len > 0;
+    // The flag turns the need off.
+    var need_gt = !inc && has_hi && hi_c.v.pre.len > 0;
+    var need_lt = !inc && has_lo && lo_c.v.pre.len > 0;
     // The exception: <1.2.3-0 is the same as <1.2.3.
     if need_lt && lo_c.v.pre == "0" && lo_c.op == OP_LT { need_lt = false; }
 
@@ -648,7 +650,7 @@ fn simple_subset(s: Comparator[>..]&, d: Comparator[>..]&) -> i32 {
             if need_gt && c.v.pre.len > 0 && same_tuple(c.v, hi_c.v) { need_gt = false; }
             if is_up(c.op) {
                 if gt_beaten(hi_c, c) { return 0; }
-            } else if hi_c.op == OP_GTE && !one_matches(hi_c.v, c) {
+            } else if hi_c.op == OP_GTE && !one_matches(hi_c.v, c, inc) {
                 return 0;
             }
         }
@@ -656,7 +658,7 @@ fn simple_subset(s: Comparator[>..]&, d: Comparator[>..]&) -> i32 {
             if need_lt && c.v.pre.len > 0 && same_tuple(c.v, lo_c.v) { need_lt = false; }
             if is_down(c.op) {
                 if lt_beaten(lo_c, c) { return 0; }
-            } else if lo_c.op == OP_LTE && !one_matches(lo_c.v, c) {
+            } else if lo_c.op == OP_LTE && !one_matches(lo_c.v, c, inc) {
                 return 0;
             }
         }
@@ -672,6 +674,12 @@ fn simple_subset(s: Comparator[>..]&, d: Comparator[>..]&) -> i32 {
 // subset tells whether every version that fits sub also fits dom. It is the
 // subset of npm. A bad range gives false.
 fn subset(sub: const u8[:], dom: const u8[:]) -> bool {
+    return subset_o(sub, dom, RangeOpts { .. });
+}
+
+// subset_o is subset with the options.
+fn subset_o(sub: const u8[:], dom: const u8[:], o: RangeOpts) -> bool {
+    let inc = o.include_prerelease;
     if sub == dom { return true; }
     var ns: u8[>..] = [];
     var cs: Comparator[>..] = [];
@@ -679,8 +687,8 @@ fn subset(sub: const u8[:], dom: const u8[:]) -> bool {
     var nd: u8[>..] = [];
     var cd: Comparator[>..] = [];
     var ed: i64[>..] = [];
-    if !parse_range(ns, cs, es, sub) { return false; }
-    if !parse_range(nd, cd, ed, dom) { return false; }
+    if !parse_range(ns, cs, es, sub, inc) { return false; }
+    if !parse_range(nd, cd, ed, dom, inc) { return false; }
     var s: Comparator[>..] = [];
     var d: Comparator[>..] = [];
     // Once a set that is not null is seen, a later null set no longer
@@ -697,7 +705,7 @@ fn subset(sub: const u8[:], dom: const u8[:]) -> bool {
             while x < es[i] { s.push(cs[x]); x += 1; }
             var y = set_start(ed, j);
             while y < ed[j] { d.push(cd[y]); y += 1; }
-            let r = simple_subset(s, d);
+            let r = simple_subset(s, d, inc);
             if r != 2 { saw_non_null = true; }
             if r == 1 { matched = true; }
             j += 1;
@@ -714,13 +722,18 @@ fn subset(sub: const u8[:], dom: const u8[:]) -> bool {
 // (hilo is ">") or below every version of it (hilo is "<"). It is the
 // outside of npm. A bad range or another hilo gives false.
 fn outside(v: Version, range: const u8[:], hilo: const u8[:]) -> bool {
+    return outside_match(v, range, hilo, false);
+}
+
+// outside_match is outside with the flag of the pre-release rule.
+fn outside_match(v: Version, range: const u8[:], hilo: const u8[:], inc: bool) -> bool {
     var up = true;
     if hilo == "<" { up = false; } else if hilo != ">" { return false; }
     var norm: u8[>..] = [];
     var comps: Comparator[>..] = [];
     var ends: i64[>..] = [];
-    if !parse_range(norm, comps, ends, range) { return false; }
-    if range_ok(v, comps, ends) { return false; }
+    if !parse_range(norm, comps, ends, range, inc) { return false; }
+    if range_ok(v, comps, ends, inc) { return false; }
     let comp_op = if up { OP_GT } else { OP_LT };
     let ecomp_op = if up { OP_GTE } else { OP_LTE };
     var s: i64 = 0;
@@ -759,37 +772,35 @@ fn outside(v: Version, range: const u8[:], hilo: const u8[:]) -> bool {
 
 // gtr tells whether the version is above every version of the range.
 fn gtr(v: Version, range: const u8[:]) -> bool {
-    return outside(v, range, ">");
+    return outside_match(v, range, ">", false);
+}
+
+// gtr_o is gtr with the options.
+fn gtr_o(v: Version, range: const u8[:], o: RangeOpts) -> bool {
+    return outside_match(v, range, ">", o.include_prerelease);
+}
+
+// ltr_o is ltr with the options.
+fn ltr_o(v: Version, range: const u8[:], o: RangeOpts) -> bool {
+    return outside_match(v, range, "<", o.include_prerelease);
 }
 
 // to_comparators writes the sets of the range into the list. The `||` in
 // the range starts a new list. It gives false for a bad range. The
 // texts of the parts point into norm, so norm must outlive the list.
 fn to_comparators(norm: u8[>..]&, parts: const u8[:][>..]&, ends: i64[>..]&, range: const u8[:]) -> bool {
+    return to_comparators_o(norm, parts, ends, range, RangeOpts { .. });
+}
+
+// to_comparators_o is to_comparators with the options.
+fn to_comparators_o(norm: u8[>..]&, parts: const u8[:][>..]&, ends: i64[>..]&, range: const u8[:], o: RangeOpts) -> bool {
     if range.len > MAX_RANGE_BYTES { return false; }
-    if !normalize(norm, range) { return false; }
+    if !normalize(norm, range, o.include_prerelease) { return false; }
     let sets = split(norm[..], "||");
-    // A null set goes away when another set stays. npm keeps the first
-    // null set when every set is a null set.
-    var nulls: i64 = 0;
     var i: i64 = 0;
     while i < sets.len {
-        if sets[i] == "<0.0.0-0" { nulls += 1; }
-        i += 1;
-    }
-    let keep_null = nulls == sets.len;
-    i = 0;
-    while i < sets.len {
         let set = sets[i];
-        if set == "<0.0.0-0" && !keep_null { i += 1; continue; }
-        // The same comparator appears once in a set.
-        let ws = words(set);
-        let at = parts.len;
-        var j: i64 = 0;
-        while j < ws.len {
-            if !contains(parts[at..], ws[j]) { parts.push(ws[j]); }
-            j += 1;
-        }
+        for w in words(set) { parts.push(w); }
         ends.push(parts.len);
         i += 1;
     }
@@ -799,10 +810,15 @@ fn to_comparators(norm: u8[>..]&, parts: const u8[:][>..]&, ends: i64[>..]&, ran
 // simplify_range writes the range text of npm into out. It keeps the
 // versions that the range names. It gives false for a bad range.
 fn simplify_range(out: u8[>..]&, versions: const u8[:][:], range: const u8[:]) -> bool {
+    return simplify_range_o(out, versions, range, RangeOpts { .. });
+}
+
+// simplify_range_o is simplify_range with the options.
+fn simplify_range_o(out: u8[>..]&, versions: const u8[:][:], range: const u8[:], o: RangeOpts) -> bool {
     // The range is read once. The sets hold the strict comparators.
     if range.len > MAX_RANGE_BYTES { return false; }
     var norm: u8[>..] = [];
-    if !normalize(norm, range) { return false; }
+    if !normalize(norm, range, o.include_prerelease) { return false; }
     let sets = split(norm[..], "||");
     // The versions come in order, as npm sorts them.
     var order: i64[>..] = [];
@@ -820,7 +836,7 @@ fn simplify_range(out: u8[>..]&, versions: const u8[:][:], range: const u8[:]) -
         if !ok { return false; }
         var hit = false;
         for set in sets {
-            if set_matches(v, set) { hit = true; }
+            if set_matches(v, set, o.include_prerelease) { hit = true; }
         }
         if hit {
             if first < 0 { first = order[i]; }
@@ -869,5 +885,10 @@ fn run_text(out: u8[>..]&, min: const u8[:], max: const u8[:], at_lowest: bool, 
 
 // ltr tells whether the version is below every version of the range.
 fn ltr(v: Version, range: const u8[:]) -> bool {
-    return outside(v, range, "<");
+    return outside_match(v, range, "<", false);
+}
+
+// outside_o is outside with the options.
+fn outside_o(v: Version, range: const u8[:], hilo: const u8[:], o: RangeOpts) -> bool {
+    return outside_match(v, range, hilo, o.include_prerelease);
 }

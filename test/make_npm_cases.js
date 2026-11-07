@@ -86,7 +86,7 @@ function goodRange() {
 const q = (s) => JSON.stringify(s);
 const out = [];
 const w = (s) => out.push(s);
-const count = { select: 0, sort: 0, compare: 0, minversion: 0, intersects: 0, subset: 0, outside: 0, valid: 0, comparetext: 0, ident: 0, cmp: 0, comparators: 0, simplify: 0 };
+const count = { select: 0, sort: 0, compare: 0, minversion: 0, intersects: 0, subset: 0, outside: 0, valid: 0, comparetext: 0, ident: 0, cmp: 0, comparators: 0, simplify: 0, include_pre: 0, range_dedup: 0 };
 
 const HEAD = [
   '// Cases made by test/make_npm_cases.js with npm semver ' + require('semver/package.json').version + '.',
@@ -439,6 +439,186 @@ for (let i = 0; i < 60; i++) {
   const want = semver.simplifyRange(list, r);
   w(`    simplify_case(${q(list.join(' '))}, ${q(r)}, ${q(want)});`);
   count.simplify++;
+}
+w('}');
+
+// the calls with the includePrerelease flag of npm
+w('// The calls with the includePrerelease flag. The flag turns the');
+w('// same-tuple rule of the pre-release off.');
+w('');
+w('fn sat_case_pre(a: const u8[:], range: const u8[:], want: bool) {');
+w('    let x, ok = semver::parse(a);');
+w('    assert(ok);');
+w('    var o = semver::RangeOpts { include_prerelease: true };');
+w('    assert(semver::satisfies_o(x, range, o) == want);');
+w('}');
+w('');
+w('fn select_case_pre(list: const u8[:], range: const u8[:], mx: const u8[:], mn: const u8[:]) {');
+w('    let vs = words(list);');
+w('    var o = semver::RangeOpts { include_prerelease: true };');
+w('    want_place(vs[..], semver::max_satisfying_o(vs[..], range, o), mx);');
+w('    want_place(vs[..], semver::min_satisfying_o(vs[..], range, o), mn);');
+w('}');
+w('');
+w('fn outside_case_pre(v: const u8[:], range: const u8[:], hi: bool, lo: bool) {');
+w('    let x, ok = semver::parse(v);');
+w('    assert(ok);');
+w('    var o = semver::RangeOpts { include_prerelease: true };');
+w('    assert(semver::gtr_o(x, range, o) == hi);');
+w('    assert(semver::ltr_o(x, range, o) == lo);');
+w('    assert(semver::outside_o(x, range, ">", o) == hi);');
+w('    assert(semver::outside_o(x, range, "<", o) == lo);');
+w('}');
+w('');
+w('fn range_case_pre(text: const u8[:], want: const u8[:]) {');
+w('    var out: u8[>..] = [];');
+w('    var o = semver::RangeOpts { include_prerelease: true };');
+w('    if want == "null" {');
+w('        assert(!semver::valid_range_o(out, text, o));');
+w('    } else {');
+w('        assert(semver::valid_range_o(out, text, o));');
+w('        assert(out[..] == want);');
+w('    }');
+w('}');
+w('');
+w('fn minversion_case_pre(range: const u8[:], want: const u8[:]) {');
+w('    var out: u8[>..] = [];');
+w('    var o = semver::RangeOpts { include_prerelease: true };');
+w('    let ok = semver::min_version_o(out, range, o);');
+w('    if want == "null" {');
+w('        assert(!ok);');
+w('        assert(out.len == 0);');
+w('    } else {');
+w('        assert(ok);');
+w('        assert(out[..] == want);');
+w('    }');
+w('}');
+w('');
+w('fn pair_case_pre(a: const u8[:], b: const u8[:], inter: bool, sub: bool) {');
+w('    var o = semver::RangeOpts { include_prerelease: true };');
+w('    assert(semver::intersects_o(a, b, o) == inter);');
+w('    assert(semver::subset_o(a, b, o) == sub);');
+w('}');
+w('');
+w('fn comparators_case_pre(range: const u8[:], want: const u8[:]) {');
+w('    var norm: u8[>..] = [];');
+w('    var parts: const u8[:][>..] = [];');
+w('    var ends: i64[>..] = [];');
+w('    var o = semver::RangeOpts { include_prerelease: true };');
+w('    assert(semver::to_comparators_o(norm, parts, ends, range, o));');
+w('    var got: u8[>..] = [];');
+w('    var at: i64 = 0;');
+w('    var i: i64 = 0;');
+w('    while i < ends.len {');
+w('        if i > 0 { got.push(\'|\'); }');
+w('        var j: i64 = at;');
+w('        while j < ends[i] {');
+w('            if j > at { got.push(\' \'); }');
+w('            got.append(parts[j]);');
+w('            j += 1;');
+w('        }');
+w('        at = ends[i];');
+w('        i += 1;');
+w('    }');
+w('    assert(got[..] == want);');
+w('}');
+w('');
+w('fn simplify_case_pre(versions: const u8[:], range: const u8[:], want: const u8[:]) {');
+w('    let vs = words(versions);');
+w('    var out: u8[>..] = [];');
+w('    var o = semver::RangeOpts { include_prerelease: true };');
+w('    assert(semver::simplify_range_o(out, vs[..], range, o));');
+w('    assert(out[..] == want);');
+w('}');
+w('');
+w('fn check_include_pre() {');
+const OPTS = { includePrerelease: true };
+for (let i = 0; i < 60; i++) {
+  const v = version(false);
+  const r = goodRange();
+  w(`    sat_case_pre(${q(v)}, ${q(r)}, ${semver.satisfies(v, r, OPTS)});`);
+  count.include_pre++;
+}
+for (let i = 0; i < 40; i++) {
+  const n = 1 + int(6);
+  const list = [];
+  for (let k = 0; k < n; k++) list.push(version(true));
+  const r = goodRange();
+  const mx = semver.maxSatisfying(list, r, OPTS);
+  const mn = semver.minSatisfying(list, r, OPTS);
+  w(`    select_case_pre(${q(list.join(' '))}, ${q(r)}, ${q(mx === null ? 'null' : mx)}, ${q(mn === null ? 'null' : mn)});`);
+  count.include_pre++;
+}
+for (let i = 0; i < 40; i++) {
+  const v = version(false);
+  const r = goodRange();
+  w(`    outside_case_pre(${q(v)}, ${q(r)}, ${semver.gtr(v, r, OPTS)}, ${semver.ltr(v, r, OPTS)});`);
+  count.include_pre++;
+}
+for (let i = 0; i < 50; i++) {
+  const r = goodRange();
+  w(`    range_case_pre(${q(r)}, ${q(semver.validRange(r, OPTS))});`);
+  count.include_pre++;
+}
+for (let i = 0; i < 40; i++) {
+  const r = goodRange();
+  const m = semver.minVersion(r, OPTS);
+  w(`    minversion_case_pre(${q(r)}, ${q(m === null ? 'null' : m.version)});`);
+  count.include_pre++;
+}
+for (let i = 0; i < 60; i++) {
+  const a = goodRange(), b = goodRange();
+  w(`    pair_case_pre(${q(a)}, ${q(b)}, ${semver.intersects(a, b, OPTS)}, ${semver.subset(a, b, OPTS)});`);
+  count.include_pre++;
+}
+for (let i = 0; i < 30; i++) {
+  const r = goodRange();
+  const want = semver.toComparators(r, OPTS).map((set) => set.join(' ')).join('|');
+  w(`    comparators_case_pre(${q(r)}, ${q(want)});`);
+  count.include_pre++;
+}
+for (let i = 0; i < 30; i++) {
+  const n = 1 + int(7);
+  const list = [];
+  for (let k = 0; k < n; k++) list.push(version(false));
+  const r = goodRange();
+  const want = semver.simplifyRange(list, r, OPTS);
+  w(`    simplify_case_pre(${q(list.join(' '))}, ${q(r)}, ${q(String(want))});`);
+  count.include_pre++;
+}
+w('}');
+w('');
+
+// valid_range with repeated comparators in one set
+w('fn range_case(text: const u8[:], want: const u8[:]) {');
+w('    var out: u8[>..] = [];');
+w('    if want == "null" {');
+w('        assert(!semver::valid_range(out, text));');
+w('    } else {');
+w('        assert(semver::valid_range(out, text));');
+w('        assert(out[..] == want);');
+w('    }');
+w('}');
+w('');
+w('fn check_range_dedup() {');
+for (let i = 0; i < 60; i++) {
+  const n = 1 + int(3);
+  const sets = [];
+  for (let k = 0; k < n; k++) {
+    const m = 1 + int(3);
+    const comps = [];
+    for (let j = 0; j < m; j++) {
+      const op = pick(['', '=', '>=', '<=', '>', '<', '^', '~']);
+      comps.push(op + partial());
+      if (int(3) === 0) comps.push(comps[comps.length - 1]);
+    }
+    sets.push(comps.join(' '));
+    if (int(4) === 0) sets.push(sets[sets.length - 1]);
+  }
+  const r = sets.join('||');
+  const want = semver.validRange(r);
+  w(`    range_case(${q(r)}, ${q(want === null ? 'null' : want)});`);
+  count.range_dedup++;
 }
 w('}');
 

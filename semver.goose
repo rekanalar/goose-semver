@@ -33,6 +33,12 @@ struct Version {
     build: const u8[:],
 }
 
+
+// RangeOpts holds the options of the range calls. The zero value gives
+// the behaviour of npm without options.
+struct RangeOpts {
+    include_prerelease: bool,
+}
 // parse reads one version. It returns false when the text is not a
 // version in the SemVer form. The pre-release and the build fields of the
 // result refer to the input.
@@ -502,6 +508,28 @@ fn patch(s: const u8[:]) -> i64, bool {
     return v.patch, true;
 }
 
+// major_text writes the major number of the text into out, as the Go
+// Masterminds/semver Major text. It gives false, with out untouched, when
+// the text holds no version.
+fn major_text(out: u8[>..]&, s: const u8[:]) -> bool {
+    let v, ok = parse(s);
+    if !ok { return false; }
+    format(out, v.major);
+    return true;
+}
+
+// major_minor_text writes "major.minor" of the text into out, as the Go
+// Masterminds/semver MajorMinor text. It gives false, with out untouched,
+// when the text holds no version.
+fn major_minor_text(out: u8[>..]&, s: const u8[:]) -> bool {
+    let v, ok = parse(s);
+    if !ok { return false; }
+    format(out, v.major);
+    out.push('.');
+    format(out, v.minor);
+    return true;
+}
+
 // prerelease writes the parts of the pre-release of the text into the
 // list. It gives false when the text holds no version or no
 // pre-release.
@@ -651,29 +679,33 @@ fn split_op(s: const u8[:]) -> i32, const u8[:] {
 }
 
 // add writes one comparator into seg. The null set "<0.0.0-0" sets the
-// flag instead. ">=0.0.0" matches all, so it is dropped. z adds the "-0"
-// pre-release, the lowest one.
-fn add(seg: u8[>..]&, nullset: bool&, op: const u8[:], ma: i64, mi: i64, pa: i64, pre: const u8[:], z: bool) {
-    if op == "<" && ma == 0 && mi == 0 && pa == 0 && z { nullset = true; return; }
-    if op == ">=" && ma == 0 && mi == 0 && pa == 0 && pre.len == 0 && !z { return; }
-    if seg.len > 0 { seg.push(' '); }
-    seg.append(op);
-    format(seg, ma);
-    seg.push('.');
-    format(seg, mi);
-    seg.push('.');
-    format(seg, pa);
-    if pre.len > 0 {
-        seg.push('-');
-        seg.append(pre);
-    } else if z {
-        seg.append("-0");
+// flag instead. ">=0.0.0" matches all, so it is dropped; with the flag
+// `inc` the same bound is ">=0.0.0-0". z adds the "-0" pre-release, the
+// lowest one. A comparator that repeats one of seg is not written again.
+fn add(seg: u8[>..]&, nullset: bool&, op: const u8[:], ma: i64, mi: i64, pa: i64, pre: const u8[:], z: bool, inc: bool) {
+    let zero_pre = pre == "0" || (pre.len == 0 && z);
+    let no_pre = pre.len == 0 && !z;
+    if op == "<" && ma == 0 && mi == 0 && pa == 0 && zero_pre { nullset = true; return; }
+    if op == ">=" && ma == 0 && mi == 0 && pa == 0 && (if inc { zero_pre } else { no_pre }) { return; }
+    var one: u8[>..] = [];
+    one.append(op);
+    format(one, ma);
+    one.push('.');
+    format(one, mi);
+    one.push('.');
+    format(one, pa);
+    if pre.len > 0 { one.push('-'); one.append(pre); } else if z { one.append("-0"); }
+    for w in words(seg[..]) {
+        if w == one[..] { return; }
     }
+    if seg.len > 0 { seg.push(' '); }
+    seg.append(one);
 }
 
 // norm_token turns one range token into comparators in seg. pfx holds an
-// operator that stood apart from the token ("> 1.2.3"), or is empty.
-fn norm_token(seg: u8[>..]&, nullset: bool&, pfx: const u8[:], tok: const u8[:]) -> bool {
+// operator that stood apart from the token ("> 1.2.3"), or is empty. The
+// flag inc moves the lower bounds of x-ranges and carets to "-0", as npm.
+fn norm_token(seg: u8[>..]&, nullset: bool&, pfx: const u8[:], tok: const u8[:], inc: bool) -> bool {
     var rest = tok;
     var kind: i32 = 0;
     var op: const u8[:] = "";
@@ -700,38 +732,41 @@ fn norm_token(seg: u8[>..]&, nullset: bool&, pfx: const u8[:], tok: const u8[:])
     }
     if kind == 2 {
         // Tilde: the same minor, or the same major when no minor is given.
+        // The flag changes nothing here.
         if x_minor {
-            add(seg, nullset, ">=", p.mj, 0, 0, "", false);
-            add(seg, nullset, "<", p.mj + 1, 0, 0, "", true);
+            add(seg, nullset, ">=", p.mj, 0, 0, "", false, inc);
+            add(seg, nullset, "<", p.mj + 1, 0, 0, "", true, inc);
         } else if x_patch {
-            add(seg, nullset, ">=", p.mj, p.mn, 0, "", false);
-            add(seg, nullset, "<", p.mj, p.mn + 1, 0, "", true);
+            add(seg, nullset, ">=", p.mj, p.mn, 0, "", false, inc);
+            add(seg, nullset, "<", p.mj, p.mn + 1, 0, "", true, inc);
         } else {
-            add(seg, nullset, ">=", p.mj, p.mn, p.pt, p.pre, false);
-            add(seg, nullset, "<", p.mj, p.mn + 1, 0, "", true);
+            add(seg, nullset, ">=", p.mj, p.mn, p.pt, p.pre, false, inc);
+            add(seg, nullset, "<", p.mj, p.mn + 1, 0, "", true, inc);
         }
         return true;
     }
     if kind == 1 {
-        // Caret: nothing left of the first non-zero number may change.
+        // Caret: nothing left of the first non-zero number may change. The
+        // flag adds "-0" to the lower bound, except for a major above zero
+        // with a full version, and except when a pre-release is given.
         if x_minor {
-            add(seg, nullset, ">=", p.mj, 0, 0, "", false);
-            add(seg, nullset, "<", p.mj + 1, 0, 0, "", true);
+            add(seg, nullset, ">=", p.mj, 0, 0, "", inc, inc);
+            add(seg, nullset, "<", p.mj + 1, 0, 0, "", true, inc);
         } else if x_patch {
-            add(seg, nullset, ">=", p.mj, p.mn, 0, "", false);
+            add(seg, nullset, ">=", p.mj, p.mn, 0, "", inc, inc);
             if p.mj == 0 {
-                add(seg, nullset, "<", 0, p.mn + 1, 0, "", true);
+                add(seg, nullset, "<", 0, p.mn + 1, 0, "", true, inc);
             } else {
-                add(seg, nullset, "<", p.mj + 1, 0, 0, "", true);
+                add(seg, nullset, "<", p.mj + 1, 0, 0, "", true, inc);
             }
         } else {
-            add(seg, nullset, ">=", p.mj, p.mn, p.pt, p.pre, false);
+            add(seg, nullset, ">=", p.mj, p.mn, p.pt, p.pre, inc && p.mj == 0, inc);
             if p.mj > 0 {
-                add(seg, nullset, "<", p.mj + 1, 0, 0, "", true);
+                add(seg, nullset, "<", p.mj + 1, 0, 0, "", true, inc);
             } else if p.mn > 0 {
-                add(seg, nullset, "<", 0, p.mn + 1, 0, "", true);
+                add(seg, nullset, "<", 0, p.mn + 1, 0, "", true, inc);
             } else {
-                add(seg, nullset, "<", 0, 0, p.pt + 1, "", true);
+                add(seg, nullset, "<", 0, 0, p.pt + 1, "", true, inc);
             }
         }
         return true;
@@ -748,42 +783,45 @@ fn norm_token(seg: u8[>..]&, nullset: bool&, pfx: const u8[:], tok: const u8[:])
             o = "<";
             if x_minor { ma += 1; } else { mi += 1; }
         }
-        add(seg, nullset, o, ma, mi, 0, "", o == "<");
+        add(seg, nullset, o, ma, mi, 0, "", o == "<" || inc, inc);
     } else if x_minor {
-        add(seg, nullset, ">=", p.mj, 0, 0, "", false);
-        add(seg, nullset, "<", p.mj + 1, 0, 0, "", true);
+        add(seg, nullset, ">=", p.mj, 0, 0, "", inc, inc);
+        add(seg, nullset, "<", p.mj + 1, 0, 0, "", true, inc);
     } else if x_patch {
-        add(seg, nullset, ">=", p.mj, p.mn, 0, "", false);
-        add(seg, nullset, "<", p.mj, p.mn + 1, 0, "", true);
+        add(seg, nullset, ">=", p.mj, p.mn, 0, "", inc, inc);
+        add(seg, nullset, "<", p.mj, p.mn + 1, 0, "", true, inc);
     } else {
-        add(seg, nullset, op, p.mj, p.mn, p.pt, p.pre, false);
+        add(seg, nullset, op, p.mj, p.mn, p.pt, p.pre, false, inc);
     }
     return true;
 }
 
 // norm_set turns one "||" alternative into comparators in seg.
-fn norm_set(set: const u8[:], seg: u8[>..]&, nullset: bool&) -> bool {
+fn norm_set(set: const u8[:], seg: u8[>..]&, nullset: bool&, inc: bool) -> bool {
     let toks = words(set);
     if toks.len == 3 && toks[1] == "-" {
-        // A hyphen range: both ends are x-range versions.
+        // A hyphen range: both ends are x-range versions. The flag moves
+        // the low end to "-0" and a full high end to "<next patch-0".
         let a, oka = parse_partial(toks[0]);
         let b, okb = parse_partial(toks[2]);
         if !oka || !okb { return false; }
         if a.mj < 0 {
         } else if a.mn < 0 {
-            add(seg, nullset, ">=", a.mj, 0, 0, "", false);
+            add(seg, nullset, ">=", a.mj, 0, 0, "", inc, inc);
         } else if a.pt < 0 {
-            add(seg, nullset, ">=", a.mj, a.mn, 0, "", false);
+            add(seg, nullset, ">=", a.mj, a.mn, 0, "", inc, inc);
         } else {
-            add(seg, nullset, ">=", a.mj, a.mn, a.pt, a.pre, false);
+            add(seg, nullset, ">=", a.mj, a.mn, a.pt, a.pre, inc, inc);
         }
         if b.mj < 0 {
         } else if b.mn < 0 {
-            add(seg, nullset, "<", b.mj + 1, 0, 0, "", true);
+            add(seg, nullset, "<", b.mj + 1, 0, 0, "", true, inc);
         } else if b.pt < 0 {
-            add(seg, nullset, "<", b.mj, b.mn + 1, 0, "", true);
+            add(seg, nullset, "<", b.mj, b.mn + 1, 0, "", true, inc);
+        } else if b.pre.len == 0 && inc {
+            add(seg, nullset, "<", b.mj, b.mn, b.pt + 1, "", true, inc);
         } else {
-            add(seg, nullset, "<=", b.mj, b.mn, b.pt, b.pre, false);
+            add(seg, nullset, "<=", b.mj, b.mn, b.pt, b.pre, false, inc);
         }
         return true;
     }
@@ -794,10 +832,10 @@ fn norm_set(set: const u8[:], seg: u8[>..]&, nullset: bool&) -> bool {
         if o.len > 0 && o.len == t.len {
             // An operator that stands alone binds to the next token.
             if i + 1 >= toks.len { return false; }
-            if !norm_token(seg, nullset, t, toks[i + 1]) { return false; }
+            if !norm_token(seg, nullset, t, toks[i + 1], inc) { return false; }
             i += 2;
         } else {
-            if !norm_token(seg, nullset, "", t) { return false; }
+            if !norm_token(seg, nullset, "", t, inc) { return false; }
             i += 1;
         }
     }
@@ -806,25 +844,47 @@ fn norm_set(set: const u8[:], seg: u8[>..]&, nullset: bool&) -> bool {
 
 // normalize writes the range as strict comparators: sets joined by "||",
 // comparators joined by a space. A range that matches every release gives
-// the empty text. It returns false when the range is not valid.
-fn normalize(out: u8[>..]&, range: const u8[:]) -> bool {
+// the empty text. A null set goes when another set stays; when every set is
+// null, the first stays. It returns false when the range is not valid or
+// above MAX_RANGE_BYTES.
+fn normalize(out: u8[>..]&, range: const u8[:], inc: bool) -> bool {
+    // Every call reads a range through here, so the size limit stands here.
+    if range.len > MAX_RANGE_BYTES { return false; }
     let sets = split(range, "||");
     var all = false;
-    var norm: u8[>..] = [];
-    for set, i in sets {
+    // The texts of the sets stand in one buffer; ends marks where each stops.
+    var buf: u8[>..] = [];
+    var ends: i64[>..] = [];
+    var nulls: bool[>..] = [];
+    var live: i64 = 0;
+    for set in sets {
         var seg: u8[>..] = [];
         var nullset = false;
-        if !norm_set(set, seg, nullset) { return false; }
-        if i > 0 { norm.append("||"); }
-        if nullset {
-            norm.append("<0.0.0-0");
-        } else {
-            norm.append(seg);
-            if seg.len == 0 { all = true; }
-        }
+        if !norm_set(set, seg, nullset, inc) { return false; }
+        if nullset { seg.clear(); } else { live += 1; }
+        if !nullset && seg.len == 0 { all = true; }
+        buf.append(seg);
+        ends.push(buf.len);
+        nulls.push(nullset);
     }
     if all && sets.len > 1 { return true; }
-    out.append(norm);
+    var wrote = false;
+    var i: i64 = 0;
+    while i < ends.len {
+        // With several sets, null sets go. When all are null the first stays.
+        let skip = sets.len > 1 && nulls[i] && (live > 0 || i > 0);
+        if !skip {
+            if wrote { out.append("||"); }
+            if nulls[i] {
+                out.append("<0.0.0-0");
+            } else {
+                let from: i64 = if i == 0 { 0 } else { ends[i - 1] };
+                out.append(buf[from..ends[i]]);
+            }
+            wrote = true;
+        }
+        i += 1;
+    }
     return true;
 }
 
@@ -832,8 +892,14 @@ fn normalize(out: u8[>..]&, range: const u8[:]) -> bool {
 // validRange does: "^1.2.3" gives ">=1.2.3 <2.0.0-0". A range that matches
 // every release gives "*". It returns false when the range is not valid.
 fn valid_range(out: u8[>..]&, range: const u8[:]) -> bool {
+    return valid_range_o(out, range, RangeOpts { .. });
+}
+
+// valid_range_o is valid_range with the options. The flag changes the
+// strict form: "^1.2.x" gives ">=1.2.0-0 <2.0.0-0".
+fn valid_range_o(out: u8[>..]&, range: const u8[:], o: RangeOpts) -> bool {
     var norm: u8[>..] = [];
-    if !normalize(norm, range) { return false; }
+    if !normalize(norm, range, o.include_prerelease) { return false; }
     if norm.len == 0 { out.push('*'); } else { out.append(norm); }
     return true;
 }
@@ -844,17 +910,24 @@ fn valid_range(out: u8[>..]&, range: const u8[:]) -> bool {
 // major, minor and patch carries a pre-release. A bad range matches
 // nothing.
 fn satisfies(v: Version, range: const u8[:]) -> bool {
+    return satisfies_o(v, range, RangeOpts { .. });
+}
+
+// satisfies_o is satisfies with the options. With the flag
+// `include_prerelease` the range reads as npm reads it with the flag, and
+// the same-tuple rule of the pre-release goes off.
+fn satisfies_o(v: Version, range: const u8[:], o: RangeOpts) -> bool {
     var norm: u8[>..] = [];
-    if !normalize(norm, range) { return false; }
+    if !normalize(norm, range, o.include_prerelease) { return false; }
     let sets = split(norm, "||");
     for set in sets {
-        if set_matches(v, set) { return true; }
+        if set_matches(v, set, o.include_prerelease) { return true; }
     }
     return false;
 }
 
 // set_matches tests one set of strict comparators.
-fn set_matches(v: Version, set: const u8[:]) -> bool {
+fn set_matches(v: Version, set: const u8[:], inc: bool) -> bool {
     let comps = words(set);
     var pre_ok = false;
     for comp in comps {
@@ -874,7 +947,7 @@ fn set_matches(v: Version, set: const u8[:]) -> bool {
         }
     }
     // A pre-release version needs a comparator of its own major, minor and
-    // patch that names a pre-release.
-    if v.pre.len > 0 { return pre_ok; }
+    // patch that names a pre-release. The flag turns the rule off.
+    if v.pre.len > 0 && !inc { return pre_ok; }
     return true;
 }

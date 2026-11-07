@@ -20,14 +20,14 @@ Semantic versions for the [Goose](https://github.com/aardappel/goose) programmin
 Put this line in the root file of your program:
 
 ```goose
-import semver from "rekanalar/goose-semver@v0.4.0";
+import semver from "rekanalar/goose-semver@v1.0.0";
 ```
 
 ## Example
 
 ```goose
 import std;
-import semver from "rekanalar/goose-semver@v0.4.0";
+import semver from "rekanalar/goose-semver@v1.0.0";
 
 fn main() {
     let a, ok = semver::parse("1.2.3-alpha.1");
@@ -74,6 +74,11 @@ fn main() {
 | `compare_loose(a, b)` | -1, 0 or 1: the order of two texts without the build part |
 | `to_comparators(norm, parts, ends, range)` | the sets of the range written into parts, or false |
 | `simplify_range(out, versions, range)` | the shorter range text written into out, or false |
+| `major_text(out, s)`, `major_minor_text(out, s)` | `major` or `major.minor` written into out, or false |
+| `RangeOpts { include_prerelease }` | the options of the `_o` calls; the zero value changes nothing |
+| `satisfies_o`, `valid_range_o`, `max_satisfying_o`, `min_satisfying_o` | the call with the options |
+| `min_version_o`, `intersects_o`, `subset_o`, `outside_o`, `gtr_o`, `ltr_o` | the call with the options |
+| `to_comparators_o`, `simplify_range_o` | the call with the options |
 
 The fields `major`, `minor`, `patch`, `pre` and `build` of a version are
 the accessors. The pre-release and build fields refer to the text that
@@ -120,11 +125,13 @@ The differences from npm:
 
 - npm throws on a bad version or a bad range. Here the calls give -1,
   false or no version. No call aborts.
-- There is no `includePrerelease` and no `loose` option.
+- The flag `include_prerelease` of `RangeOpts` is the `includePrerelease`
+  option of npm. It changes the strict form of x-ranges, carets and
+  hyphen ranges, and it turns the same-tuple rule off.
 
 The check against npm: the script `test/make_npm_cases.js` makes
 `test/npm_cases.goose` with npm `semver` 7.6.1. The seed is fixed. The file
-holds 1510 cases:
+holds 1920 cases:
 
 - 180 selections, 70 sorts and 120 comparisons.
 
@@ -134,6 +141,10 @@ holds 1510 cases:
 
 - 80 comparators and 60 `simplify_range`.
 
+- 350 cases with the flag, one group for each `_o` call.
+
+- 60 `valid_range` inputs with repeated comparators and null sets.
+
 Each result equals the result of npm.
 
 ## Limits
@@ -141,17 +152,16 @@ Each result equals the result of npm.
 - Numbers are `i64`. A number above 9007199254740991 is not a version.
 - A numeric part of a pre-release is a number in npm. It stays a text
   here.
-- No loose mode and no `includePrerelease` option.
-- `coerce` has no right-to-left mode and no pre-release option.
-- `valid_range` does not remove repeated comparators or empty-set
-  alternatives. Its text can differ from npm in those cases only.
+- No loose mode. Only npm has one. Go `Masterminds/semver` reads a
+  lenient version. The Rust `semver` crate refuses it. Python `packaging`
+  follows PEP 440. The libraries disagree, and no standard fixes it.
+- `coerce` has no right-to-left mode and no pre-release option. Only npm
+  has them. The Go, Rust and Python libraries have no coerce at all.
 - `compare_identifiers` compares a number of any length, digit by
   digit. npm reads a number up to 9007199254740991 and rounds a larger
   one.
 - `compare_loose` takes the strict form. A text that `parse` refuses
-  gives 0. The loose mode of npm reads leading zeros, a leading `=`, and
-  a pre-release without a dash.
-- The Go helpers `Major` and `MajorMinor` are not there.
+  gives 0, because the package has no loose mode.
 
 ## Test
 

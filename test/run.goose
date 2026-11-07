@@ -232,6 +232,41 @@ fn test_satisfies() {
     expect_sat("1.2.3", "=1.2.3", true);
 }
 
+// test_flag checks the flag on the hand cases of the npm docs.
+fn test_flag() {
+    var o = semver::RangeOpts { include_prerelease: true };
+    var out: u8[>..] = [];
+    let a, _ = semver::parse("1.1.0-alpha");
+    assert(!semver::satisfies(a, "^1.0.0"));
+    assert(!semver::satisfies_o(a, "^1.0.0", semver::RangeOpts { .. }));
+    assert(semver::satisfies_o(a, "^1.0.0", o));
+    // The flag changes the strict form of x-ranges, carets and hyphens.
+    assert(semver::valid_range_o(out, "1.2.x", o));
+    assert(out == ">=1.2.0-0 <1.3.0-0");
+    out.clear();
+    assert(semver::valid_range_o(out, "^0.2.3", o));
+    assert(out == ">=0.2.3-0 <0.3.0-0");
+    out.clear();
+    assert(semver::valid_range_o(out, "^1.2.3", o));
+    assert(out == ">=1.2.3 <2.0.0-0");
+    out.clear();
+    assert(semver::valid_range_o(out, "1.2.3 - 2.3.4", o));
+    assert(out == ">=1.2.3-0 <2.3.5-0");
+    out.clear();
+    assert(semver::valid_range_o(out, ">=0.0.0", o));
+    assert(out == ">=0.0.0");
+    out.clear();
+    assert(semver::valid_range_o(out, ">=0.0.0-0", o));
+    assert(out == "*");
+    // A repeated comparator and a null set drop, as in npm.
+    out.clear();
+    assert(semver::valid_range(out, ">=1.0.0 >=1.0.0"));
+    assert(out == ">=1.0.0");
+    out.clear();
+    assert(semver::valid_range(out, ">1||1.2.3"));
+    assert(out == ">=2.0.0||1.2.3");
+}
+
 fn test_valid_range() {
     expect_range("*", "*");
     expect_range("", "*");
@@ -527,6 +562,11 @@ fn test_hostile() {
     assert(!semver::subset("*", many[..]));
     var out: u8[>..] = [];
     assert(!semver::min_version(out, many[..]));
+    // satisfies and valid_range read the range through the same limit.
+    let big = repeat(">=1.2.3 ", 200000);
+    let one, _ = semver::parse("1.2.3");
+    assert(!semver::satisfies(one, big[..]));
+    assert(!semver::valid_range(out, big[..]) && out.len == 0);
     // More alternatives than the limit, in few bytes.
     var dense = repeat("1||", 1500);
     dense.append("1");
@@ -737,6 +777,16 @@ fn test_npm_calls() {
     assert(ok2 && mi == 2);
     let pa, ok3 = semver::patch("1.2.3");
     assert(ok3 && pa == 3);
+    // The Go helpers write the major text and the major-minor text.
+    var mt: u8[>..] = [];
+    assert(semver::major_text(mt, "v10.2.3-rc.1+b"));
+    assert(mt == "10");
+    mt.clear();
+    assert(semver::major_minor_text(mt, "1.2.3-rc.1"));
+    assert(mt == "1.2");
+    mt.clear();
+    assert(!semver::major_minor_text(mt, "1.2") && mt.len == 0);
+    assert(!semver::major_text(mt, "x") && mt.len == 0);
     // cmp compares two texts with an operator.
     assert(semver::cmp("1.2.3", "<", "2.0.0"));
     assert(semver::cmp("1.2.3", "===", "1.2.3"));
@@ -803,6 +853,7 @@ fn main() {
     test_parts();
     test_satisfies();
     test_valid_range();
+    test_flag();
     test_inc();
     test_diff();
     test_coerce();
@@ -832,6 +883,8 @@ fn main() {
     npm_cases::check_cmp();
     npm_cases::check_comparators();
     npm_cases::check_simplify();
+    npm_cases::check_include_pre();
+    npm_cases::check_range_dedup();
     print("all tests passed");
     return 0;
 }
