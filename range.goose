@@ -99,19 +99,12 @@ fn compare_numbers(a: const u8[:], b: const u8[:]) -> i64 {
     while x.len > 0 && x[0] == '0' { x = x[1..]; }
     while y.len > 0 && y[0] == '0' { y = y[1..]; }
     if x.len != y.len { return if x.len < y.len { -1 } else { 1 }; }
-    return compare_text(x, y);
+    return compare_bytes(x, y);
 }
 
-// compare_ident compares two identifiers of a build part. A number comes
-// before a text. Two numbers compare by value.
-fn compare_ident(a: const u8[:], b: const u8[:]) -> i64 {
-    let an = is_numeric(a);
-    let bn = is_numeric(b);
-    if an && bn { return compare_numbers(a, b); }
-    if an { return -1; }
-    if bn { return 1; }
-    return compare_text(a, b);
-}
+// compare_identifiers in semver.goose gives the order of two parts. A
+// number comes before a text, and two numbers compare by value. The
+// build part and the pre-release use the same rule, as npm does.
 
 // compare_build_part compares the build parts of two versions, as npm
 // compareBuild does. A result of zero ends the compare, even when the
@@ -129,7 +122,7 @@ fn compare_build_part(a: const u8[:], b: const u8[:]) -> i64 {
         let be = part_end(b, bi);
         let ap = a[ai..ae];
         let bp = b[bi..be];
-        if ap != bp { return compare_ident(ap, bp); }
+        if ap != bp { return compare_identifiers(ap, bp); }
         ai = ae + 1;
         bi = be + 1;
     }
@@ -767,6 +760,111 @@ fn outside(v: Version, range: const u8[:], hilo: const u8[:]) -> bool {
 // gtr tells whether the version is above every version of the range.
 fn gtr(v: Version, range: const u8[:]) -> bool {
     return outside(v, range, ">");
+}
+
+// to_comparators writes the sets of the range into the list. The `||` in
+// the range starts a new list. It gives false for a bad range. The
+// texts of the parts point into norm, so norm must outlive the list.
+fn to_comparators(norm: u8[>..]&, parts: const u8[:][>..]&, ends: i64[>..]&, range: const u8[:]) -> bool {
+    if range.len > MAX_RANGE_BYTES { return false; }
+    if !normalize(norm, range) { return false; }
+    let sets = split(norm[..], "||");
+    // A null set goes away when another set stays. npm keeps the first
+    // null set when every set is a null set.
+    var nulls: i64 = 0;
+    var i: i64 = 0;
+    while i < sets.len {
+        if sets[i] == "<0.0.0-0" { nulls += 1; }
+        i += 1;
+    }
+    let keep_null = nulls == sets.len;
+    i = 0;
+    while i < sets.len {
+        let set = sets[i];
+        if set == "<0.0.0-0" && !keep_null { i += 1; continue; }
+        // The same comparator appears once in a set.
+        let ws = words(set);
+        let at = parts.len;
+        var j: i64 = 0;
+        while j < ws.len {
+            if !contains(parts[at..], ws[j]) { parts.push(ws[j]); }
+            j += 1;
+        }
+        ends.push(parts.len);
+        i += 1;
+    }
+    return true;
+}
+
+// simplify_range writes the range text of npm into out. It keeps the
+// versions that the range names. It gives false for a bad range.
+fn simplify_range(out: u8[>..]&, versions: const u8[:][:], range: const u8[:]) -> bool {
+    // The range is read once. The sets hold the strict comparators.
+    if range.len > MAX_RANGE_BYTES { return false; }
+    var norm: u8[>..] = [];
+    if !normalize(norm, range) { return false; }
+    let sets = split(norm[..], "||");
+    // The versions come in order, as npm sorts them.
+    var order: i64[>..] = [];
+    sort(order, versions);
+    // The runs of the versions that the range keeps. A run holds the
+    // first and the last version of it. The last run has no last
+    // version, and its end stands for none.
+    var first: i64 = -1;
+    var prev: i64 = -1;
+    var wrote = false;
+    var i: i64 = 0;
+    while i < order.len {
+        let text = versions[order[i]];
+        let v, ok = parse(text);
+        if !ok { return false; }
+        var hit = false;
+        for set in sets {
+            if set_matches(v, set) { hit = true; }
+        }
+        if hit {
+            if first < 0 { first = order[i]; }
+            prev = order[i];
+        } else {
+            if first >= 0 {
+                run_text(out, versions[first], versions[prev], first == order[0], wrote);
+                wrote = true;
+                first = -1;
+                prev = -1;
+            }
+        }
+        i += 1;
+    }
+    if first >= 0 {
+        // The last run has no last version. npm gives it none.
+        run_text(out, versions[first], "", first == order[0], wrote);
+    }
+    // npm keeps the shorter of the two texts.
+    if out.len >= range.len {
+        out.clear();
+        out.append(range);
+    }
+    return true;
+}
+
+// run_text gives the text of one run of the versions. The last version
+// is empty when the run reaches the end of the list.
+fn run_text(out: u8[>..]&, min: const u8[:], max: const u8[:], at_lowest: bool, wrote: bool) {
+    if wrote { out.append(" || "); }
+    if max.len == 0 {
+        if at_lowest { out.append("*"); }
+        else { out.append(">="); out.append(min); }
+        return;
+    }
+    if min == max { out.append(min); return; }
+    if at_lowest {
+        out.append("<=");
+        out.append(max);
+        return;
+    }
+    out.append(min);
+    out.append(" - ");
+    out.append(max);
 }
 
 // ltr tells whether the version is below every version of the range.

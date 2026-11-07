@@ -590,6 +590,211 @@ fn test_hostile() {
     assert(clock_ns() - t3 < HOSTILE_NS);
 }
 
+fn test_big_numbers() {
+    // A pre-release number above 2147483647 must still order right.
+    let a, ok1 = semver::parse("1.0.0-3000000000");
+    let b, ok2 = semver::parse("1.0.0-3000000001");
+    assert(ok1 && ok2);
+    assert(semver::compare(a, b) == -1);
+    assert(semver::compare(b, a) == 1);
+    // A big number comes before a text.
+    let c, _ = semver::parse("1.0.0-3000000000");
+    let d, _ = semver::parse("1.0.0-alpha");
+    assert(semver::compare(c, d) == -1);
+    // A big number against a small one.
+    let e, _ = semver::parse("1.0.0-3000000001");
+    let f, _ = semver::parse("1.0.0-1");
+    assert(semver::compare(e, f) == 1);
+    // The exact number of a comparison.
+    let g, _ = semver::parse("1.0.0");
+    let h, _ = semver::parse("10.0.0");
+    assert(semver::compare(g, h) == -1);
+    assert(semver::compare(g, g) == 0);
+    assert(semver::compare(h, g) == 1);
+    // A version with a big number parses.
+    let i, ok3 = semver::parse("2147483648.0.0");
+    assert(ok3);
+    assert(i.major == 2147483648);
+    let j, ok4 = semver::parse("9007199254740991.0.0");
+    assert(ok4);
+    assert(j.major == 9007199254740991);
+    // A number above the limit of npm is a fault.
+    let k, ok5 = semver::parse("9007199254740992.0.0");
+    assert(!ok5);
+    // A parse reads a leading v and the space around the text.
+    let l, ok6 = semver::parse("v1.2.3");
+    assert(ok6);
+    assert(l.major == 1 && l.minor == 2 && l.patch == 3);
+    let m, ok7 = semver::parse(" 1.2.3 ");
+    assert(ok7);
+    assert(m.major == 1 && m.minor == 2 && m.patch == 3);
+    // A leading = is still a fault.
+    let n, ok8 = semver::parse("=1.2.3");
+    assert(!ok8);
+}
+
+fn test_length_limit() {
+    // npm refuses a text above 256 bytes, and reads one of 256 bytes.
+    var ok_text: u8[>..] = [];
+    ok_text.append("1.0.0-");
+    for i in 0..250 { ok_text.push('a'); }
+    assert(ok_text.len == 256);
+    let a, ok1 = semver::parse(ok_text[..]);
+    assert(ok1);
+    ok_text.push('a');
+    let b, ok2 = semver::parse(ok_text[..]);
+    assert(!ok2);
+    // The limit counts the space around the text, as npm does.
+    var padded: u8[>..] = [];
+    for i in 0..300 { padded.push(' '); }
+    padded.append("1.0.0");
+    let c, ok3 = semver::parse(padded[..]);
+    assert(!ok3);
+}
+
+fn test_big_pre_release() {
+    // A pre-release with a big number raises to the next number.
+    let a, ok1 = semver::parse("1.0.0-3000000000");
+    assert(ok1);
+    var out: u8[>..] = [];
+    assert(semver::inc(out, a, "prerelease", "", 0));
+    assert(out == "1.0.0-3000000001");
+    // A number at the limit of npm or above stays a text, as npm does.
+    let big, okbig = semver::parse("1.0.0-99999999999999999999");
+    assert(okbig);
+    out.clear();
+    assert(semver::inc(out, big, "prerelease", "", 0));
+    assert(out == "1.0.0-99999999999999999999.0");
+    let at_limit, oklim = semver::parse("1.0.0-9007199254740991");
+    assert(oklim);
+    out.clear();
+    assert(semver::inc(out, at_limit, "prerelease", "", 0));
+    assert(out == "1.0.0-9007199254740991.0");
+    // An earlier number rises when the last one is too big.
+    let two, oktwo = semver::parse("1.0.0-5.99999999999999999999");
+    assert(oktwo);
+    out.clear();
+    assert(semver::inc(out, two, "prerelease", "", 0));
+    assert(out == "1.0.0-6.99999999999999999999");
+    // A list with big pre-release numbers sorts in the order of npm.
+    var list: const u8[:][>..] = [];
+    list.push("1.0.0-3000000001");
+    list.push("1.0.0-3000000000");
+    var order: i64[>..] = [];
+    semver::sort(order, list[..]);
+    assert(order.len == 2);
+    assert(order[0] == 1);
+    assert(order[1] == 0);
+    // A range with a big pre-release number gives the answer of npm.
+    assert(semver::satisfies(a, ">=1.0.0-3000000000"));
+    let b, ok2 = semver::parse("1.0.0-3000000001");
+    assert(ok2);
+    assert(semver::satisfies(b, ">=1.0.0-3000000000"));
+    assert(!semver::satisfies(a, ">=1.0.0-3000000001"));
+}
+
+fn test_new_call_faults() {
+    // An operator that npm refuses gives no result.
+    assert(!semver::cmp("1.2.3", "~>", "1.2.3"));
+    assert(!semver::cmp("1.2.3", "''", "1.2.3"));
+    // The empty operator compares the versions.
+    assert(semver::cmp("1.2.3", "", "1.2.3"));
+    // The text operators read the text itself, as npm does.
+    assert(semver::cmp("1.2.3", "===", "1.2.3"));
+    assert(!semver::cmp("v1.2.3", "===", "1.2.3"));
+    // A text that holds no version gives no result.
+    assert(!semver::cmp("not-a-version", "==", "1.2.3"));
+    assert(!semver::cmp("1.2.3", "==", "not-a-version"));
+    // A version without a pre-release gives an empty list.
+    var parts: const u8[:][>..] = [];
+    assert(!semver::prerelease(parts, "1.2.3"));
+    assert(parts.len == 0);
+    // A range that is not a range gives no result.
+    var norm: u8[>..] = [];
+    var comps: const u8[:][>..] = [];
+    var ends: i64[>..] = [];
+    assert(!semver::to_comparators(norm, comps, ends, "not a range"));
+    var versions: const u8[:][>..] = [];
+    versions.push("1.0.0");
+    var range: u8[>..] = [];
+    assert(!semver::simplify_range(range, versions[..], "not a range"));
+}
+
+fn test_npm_calls() {
+    // valid gives the version text of npm.
+    var out: u8[>..] = [];
+    assert(semver::valid(out, "1.2.3"));
+    assert(out == "1.2.3");
+    out.clear();
+    assert(semver::valid(out, "v1.2.3"));
+    assert(out == "1.2.3");
+    out.clear();
+    assert(!semver::valid(out, "1.2"));
+    // The accessors take a text.
+    let ma, ok1 = semver::major("1.2.3");
+    assert(ok1 && ma == 1);
+    let mi, ok2 = semver::minor("1.2.3");
+    assert(ok2 && mi == 2);
+    let pa, ok3 = semver::patch("1.2.3");
+    assert(ok3 && pa == 3);
+    // cmp compares two texts with an operator.
+    assert(semver::cmp("1.2.3", "<", "2.0.0"));
+    assert(semver::cmp("1.2.3", "===", "1.2.3"));
+    assert(!semver::cmp("1.2.3", ">", "2.0.0"));
+    // rcompare gives the reverse of compare.
+    assert(semver::rcompare("1.0.0", "2.0.0") == 1);
+    assert(semver::rcompare("1.0.0", "1.0.0") == 0);
+    // compareIdentifiers compares two pre-release parts.
+    assert(semver::compare_identifiers("1", "a") == -1);
+    assert(semver::compare_identifiers("01", "1") == 0);
+    assert(semver::compare_identifiers("a", "b") == -1);
+    assert(semver::rcompare_identifiers("1", "2") == 1);
+    // compareLoose ignores the build part and the leading v.
+    assert(semver::compare_loose("1.2.3", "v1.2.4") == -1);
+    assert(semver::compare_loose("01.2.3", "1.2.3") == 0);
+    // toComparators gives the parts of a range and the ends of the sets.
+    var norm: u8[>..] = [];
+    var parts: const u8[:][>..] = [];
+    var ends: i64[>..] = [];
+    assert(semver::to_comparators(norm, parts, ends, "^1.2.3 || >=4"));
+    assert(parts.len == 3);
+    assert(parts[0] == ">=1.2.3");
+    assert(parts[1] == "<2.0.0-0");
+    assert(parts[2] == ">=4.0.0");
+    assert(ends.len == 2);
+    assert(ends[0] == 2);
+    assert(ends[1] == 3);
+    // simplifyRange gives the range text of npm.
+    var versions: const u8[:][>..] = [];
+    versions.push("1.0.0");
+    versions.push("1.2.0");
+    versions.push("3.0.0");
+    versions.push("5.0.0");
+    var range: u8[>..] = [];
+    assert(semver::simplify_range(range, versions[..], "1.x || >=2.5.0 || 5.0.0 - 7.2.3"));
+    assert(range == "*");
+    // A run in the middle of the list gives two ranges.
+    var four: const u8[:][>..] = [];
+    four.push("1.0.0");
+    four.push("1.2.0");
+    four.push("2.0.0");
+    four.push("3.0.0");
+    range.clear();
+    assert(semver::simplify_range(range, four[..], "1.0.0 - 1.2.0 || >=3.0.0"));
+    assert(range == "<=1.2.0 || >=3.0.0");
+    // npm keeps the shorter of the two texts.
+    range.clear();
+    assert(semver::simplify_range(range, four[..], "1.x || >=3.0.0"));
+    assert(range == "1.x || >=3.0.0");
+    // One version in the range gives the version.
+    var one: const u8[:][>..] = [];
+    one.push("1.0.0");
+    one.push("1.2.0");
+    range.clear();
+    assert(semver::simplify_range(range, one[..], "1.0.0"));
+    assert(range == "1.0.0");
+}
+
 fn main() {
     test_parse();
     test_parse_faults();
@@ -609,6 +814,11 @@ fn main() {
     test_outside();
     test_no_abort();
     test_hostile();
+    test_big_numbers();
+    test_length_limit();
+    test_big_pre_release();
+    test_new_call_faults();
+    test_npm_calls();
     npm_cases::check_select();
     npm_cases::check_sort();
     npm_cases::check_compare();
@@ -616,6 +826,12 @@ fn main() {
     npm_cases::check_intersects();
     npm_cases::check_subset();
     npm_cases::check_outside();
+    npm_cases::check_valid();
+    npm_cases::check_compare_text();
+    npm_cases::check_identifiers();
+    npm_cases::check_cmp();
+    npm_cases::check_comparators();
+    npm_cases::check_simplify();
     print("all tests passed");
     return 0;
 }

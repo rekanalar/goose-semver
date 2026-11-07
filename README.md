@@ -12,6 +12,7 @@ Semantic versions for the [Goose](https://github.com/aardappel/goose) programmin
 - Matches ranges with `^`, `~`, x-ranges, hyphen ranges and `||`.
 - Bumps versions, names the change between two versions, and reads loose text.
 - Picks the best version of a list, sorts a list, and compares two ranges, as npm does.
+- Holds the calls of npm `semver` 7.6.1 under their npm names.
 - Pure Goose. No C code.
 
 ## Install
@@ -19,14 +20,14 @@ Semantic versions for the [Goose](https://github.com/aardappel/goose) programmin
 Put this line in the root file of your program:
 
 ```goose
-import semver from "rekanalar/goose-semver@v0.3.0";
+import semver from "rekanalar/goose-semver@v0.4.0";
 ```
 
 ## Example
 
 ```goose
 import std;
-import semver from "rekanalar/goose-semver@v0.3.0";
+import semver from "rekanalar/goose-semver@v0.4.0";
 
 fn main() {
     let a, ok = semver::parse("1.2.3-alpha.1");
@@ -43,7 +44,7 @@ fn main() {
 | Function | Result |
 |---|---|
 | `parse(s)` | the version and whether the text holds one |
-| `compare(a, b)` | a negative number, zero, or a positive one |
+| `compare(a, b)` | -1, 0 or 1: the order of two versions |
 | `format(out, v)` | the version written into out |
 | `satisfies(v, range)` | true when the version matches the range |
 | `valid_range(out, range)` | the strict range written into out, or false |
@@ -62,6 +63,17 @@ fn main() {
 | `subset(sub, dom)` | true when every version of `sub` fits `dom` |
 | `outside(v, range, hilo)` | true when `v` is above (`">"`) or below (`"<"`) the whole range |
 | `gtr(v, range)`, `ltr(v, range)` | `outside` with `">"` and with `"<"` |
+| `valid(out, s)` | the version text of npm written into out, or false |
+| `major(s)`, `minor(s)`, `patch(s)` | the number of the part, or false |
+| `prerelease(parts, s)` | the parts of the pre-release written into parts, or false |
+| `compare_text(a, b)` | -1, 0 or 1: the order of two texts |
+| `cmp(a, op, b)` | true when the two texts hold the order of the operator |
+| `rcompare(a, b)` | -1, 0 or 1: the reverse order of two texts |
+| `compare_identifiers(a, b)` | -1, 0 or 1: the order of two pre-release parts |
+| `rcompare_identifiers(a, b)` | -1, 0 or 1: the reverse order of two pre-release parts |
+| `compare_loose(a, b)` | -1, 0 or 1: the order of two texts without the build part |
+| `to_comparators(norm, parts, ends, range)` | the sets of the range written into parts, or false |
+| `simplify_range(out, versions, range)` | the shorter range text written into out, or false |
 
 The fields `major`, `minor`, `patch`, `pre` and `build` of a version are
 the accessors. The pre-release and build fields refer to the text that
@@ -108,26 +120,53 @@ The differences from npm:
 
 - npm throws on a bad version or a bad range. Here the calls give -1,
   false or no version. No call aborts.
-- An entry of a list with a leading `v` or `=` is not a version here.
-  npm reads it. Use `clean` first.
-- `min_version` of a range whose lowest bound needs a number above
-  2147483647 gives false. npm gives the number.
 - There is no `includePrerelease` and no `loose` option.
 
 The check against npm: the script `test/make_npm_cases.js` makes
 `test/npm_cases.goose` with npm `semver` 7.6.1. The seed is fixed. The file
-holds 1020 cases: 180 selections, 70 sorts, 120 comparisons, 150
-`min_version`, 170 `intersects`, 170 `subset` and 160 `outside`. Each result
-equals the result of npm.
+holds 1510 cases:
+
+- 180 selections, 70 sorts and 120 comparisons.
+
+- 150 `min_version`, 170 `intersects`, 170 `subset` and 160 `outside`.
+
+- 90 `valid`, 90 `compare_text`, 80 identifiers and 90 `cmp`.
+
+- 80 comparators and 60 `simplify_range`.
+
+Each result equals the result of npm.
+
+## Changes in v0.4.0
+
+- Before: `compare` gave any negative or positive number. Now it gives
+  -1, 0 or 1, as npm does.
+- Before: a pre-release number above 2147483647 compared as zero. Now
+  the number is read and the order follows npm.
+- Before: the numbers of a version were `i32`. Now they are `i64`, and
+  the package holds the numbers up to 9007199254740991.
+- Before: `parse` refused a leading `v` and the space around the text.
+  Now it reads both, as npm does. A leading `=` stays a fault.
+- Before: `parse` read any length. Now a text above 256 bytes is a fault, as in npm.
+- New: `valid`, `major`, `minor`, `patch` and `prerelease`.
+- New: `cmp`, `rcompare`, `compare_identifiers`, `rcompare_identifiers`
+  and `compare_loose`.
+- New: `to_comparators` and `simplify_range`.
 
 ## Limits
 
-- Numbers are `i32`. A number above 2147483647 is not a version.
-- No loose mode and no `includePrerelease` option. `parse` rejects a
-  leading `v`. Use `clean` or `coerce` for that.
+- Numbers are `i64`. A number above 9007199254740991 is not a version.
+- A numeric part of a pre-release is a number in npm. It stays a text
+  here.
+- No loose mode and no `includePrerelease` option.
 - `coerce` has no right-to-left mode and no pre-release option.
 - `valid_range` does not remove repeated comparators or empty-set
   alternatives. Its text can differ from npm in those cases only.
+- `compare_identifiers` compares a number of any length, digit by
+  digit. npm reads a number up to 9007199254740991 and rounds a larger
+  one.
+- `compare_loose` takes the strict form. A text that `parse` refuses
+  gives 0. The loose mode of npm reads leading zeros, a leading `=`, and
+  a pre-release without a dash.
 - The Go helpers `Major` and `MajorMinor` are not there.
 
 ## Test
@@ -137,6 +176,7 @@ goose run test/run.goose
 goose run examples/parse.goose
 goose run examples/ranges.goose
 goose run examples/select.goose
+goose run examples/npm.goose
 ```
 
 ## License

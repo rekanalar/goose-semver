@@ -14,13 +14,21 @@ namespace semver;
 import std;
 import range;
 
+// MAX_NUMBER is the largest number that the package holds. It is the
+// largest number that npm semver holds, 9007199254740991.
+const MAX_NUMBER: i64 = 9007199254740991;
+
+// MAX_LENGTH is the longest text that parse reads. npm refuses a longer
+// text before it trims the text.
+const MAX_LENGTH: i64 = 256;
+
 // Version holds one version. The pre-release and the build metadata are
 // slices into the string that the parse read, so they stay valid only as
 // long as that string.
 struct Version {
-    major: i32,
-    minor: i32,
-    patch: i32,
+    major: i64,
+    minor: i64,
+    patch: i64,
     pre: const u8[:],
     build: const u8[:],
 }
@@ -30,10 +38,15 @@ struct Version {
 // result refer to the input.
 fn parse(s: const u8[:]) -> Version, bool {
     var v = Version { major: 0, minor: 0, patch: 0, pre: "", build: "" };
+    if s.len > MAX_LENGTH { return v, false; }
+
+    // The text may hold a leading v and space around it. npm reads both.
+    var text = trim(s);
+    if text.len > 0 && text[0] == 'v' { text = text[1..]; }
 
     // The build metadata starts at the first '+' and is not part of the
     // comparison.
-    var core = s;
+    var core = text;
     let plus = find(core, "+");
     if plus >= 0 {
         v.build = core[plus + 1..];
@@ -74,15 +87,15 @@ fn parse(s: const u8[:]) -> Version, bool {
 
 // parse_num reads the digits of one number. It returns false when the
 // text is empty or holds something that is not a digit.
-fn parse_num(s: const u8[:]) -> i32, bool {
+fn parse_num(s: const u8[:]) -> i64, bool {
     if s.len == 0 { return 0, false; }
     var n: i64 = 0;
     for c in s {
         if c < '0' || c > '9' { return 0, false; }
+        if n > (MAX_NUMBER - (c - '0')) / 10 { return 0, false; }
         n = n * 10 + (c - '0');
-        if n > 0x7fffffff { return 0, false; }
     }
-    return n as i32, true;
+    return n, true;
 }
 
 // num_form returns true when the number has the written form of the
@@ -146,9 +159,9 @@ fn build_form(s: const u8[:]) -> bool {
 // a positive one when b comes first, and zero when the versions hold the
 // same precedence. The build metadata takes no part in the order.
 fn compare(a: Version, b: Version) -> i64 {
-    if a.major != b.major { return a.major - b.major; }
-    if a.minor != b.minor { return a.minor - b.minor; }
-    if a.patch != b.patch { return a.patch - b.patch; }
+    if a.major != b.major { return if a.major < b.major { -1 } else { 1 }; }
+    if a.minor != b.minor { return if a.minor < b.minor { -1 } else { 1 }; }
+    if a.patch != b.patch { return if a.patch < b.patch { -1 } else { 1 }; }
     // A version with a pre-release comes before one without.
     if a.pre.len == 0 && b.pre.len == 0 { return 0; }
     if a.pre.len == 0 { return 1; }
@@ -171,21 +184,10 @@ fn compare_pre(a: const u8[:], b: const u8[:]) -> i64 {
         let b_end = part_end(b, bi);
         let ap = a[ai..a_end];
         let bp = b[bi..b_end];
-        let a_num = is_numeric(ap);
-        let b_num = is_numeric(bp);
-        if a_num && b_num {
-            let an, _ = parse_num(ap);
-            let bn, _ = parse_num(bp);
-            if an != bn { return an - bn; }
-        } else if a_num {
-            // Numbers come before letters.
-            return -1;
-        } else if b_num {
-            return 1;
-        } else {
-            let order = compare_text(ap, bp);
-            if order != 0 { return order; }
-        }
+        // One rule for all parts: a number comes before a text, two
+        // numbers compare by value, and two texts compare byte by byte.
+        let order = compare_identifiers(ap, bp);
+        if order != 0 { return order; }
         ai = a_end + 1;
         bi = b_end + 1;
     }
@@ -199,9 +201,18 @@ fn part_end(s: const u8[:], start: i64) -> i64 {
     return i;
 }
 
-// compare_text compares two parts byte by byte. The shorter one comes
-// first when one is a prefix of the other.
+// compare_text compares two version texts. It gives -1, 0 or 1. It gives
+// 0 for a text that holds no version.
 fn compare_text(a: const u8[:], b: const u8[:]) -> i64 {
+    let va, oka = parse(a);
+    let vb, okb = parse(b);
+    if !oka || !okb { return 0; }
+    return compare(va, vb);
+}
+
+// compare_bytes compares two parts byte by byte. The shorter one comes
+// first when one is a prefix of the other.
+fn compare_bytes(a: const u8[:], b: const u8[:]) -> i64 {
     let n = if a.len < b.len { a.len } else { b.len };
     var i = 0;
     while i < n {
@@ -290,6 +301,8 @@ fn diff(a: Version, b: Version) -> const u8[:] {
 // pre_bump writes the next pre-release into out, as the npm "pre" step
 // does. base is 0 or 1 for the first number, or -1 for none. It returns
 // false when the identifier already is the whole pre-release and base is -1.
+// bump_number writes one added to a digit string into next. The digits
+// come out in order, and a longer number stays exact.
 fn pre_bump(out: u8[>..]&, pre: const u8[:], ident: const u8[:], base: i64) -> bool {
     let b: i64 = if base > 0 { 1 } else { 0 };
     var next: u8[>..] = [];
@@ -297,8 +310,15 @@ fn pre_bump(out: u8[>..]&, pre: const u8[:], ident: const u8[:], base: i64) -> b
         format(next, b);
     } else {
         let parts = split(pre, '.');
+        // npm bumps the last identifier that reads as a number below its
+        // limit. A larger one stays a text, and the base number follows it.
         var last_num: i64 = -1;
-        for part, i in parts { if is_numeric(part) { last_num = i; } }
+        for part, i in parts {
+            if is_numeric(part) {
+                let n, ok = parse_num(part);
+                if ok && n < MAX_NUMBER { last_num = i; }
+            }
+        }
         for part, i in parts {
             if i > 0 { next.push('.'); }
             if i == last_num {
@@ -345,9 +365,9 @@ fn pre_bump(out: u8[>..]&, pre: const u8[:], ident: const u8[:], base: i64) -> b
 // It returns false, with out untouched, for a bad release type, a bad
 // identifier, or a release of a version with no pre-release.
 fn inc(out: u8[>..]&, v: Version, release: const u8[:], ident: const u8[:] = "", base: i64 = 0) -> bool {
-    var ma = v.major as i64;
-    var mi = v.minor as i64;
-    var pa = v.patch as i64;
+    var ma = v.major;
+    var mi = v.minor;
+    var pa = v.patch;
     var pre_in = v.pre;
     var want_pre = false;
     if release == "major" {
@@ -444,14 +464,109 @@ fn digit_end(s: const u8[:], start: i64) -> i64 {
 // and writes it into out without the build metadata, as the npm clean
 // does. It returns false, with out untouched, when the text is no version.
 fn clean(out: u8[>..]&, s: const u8[:]) -> bool {
-    var t = s;
-    while t.len > 0 && is_space(t[0]) { t = t[1..]; }
-    while t.len > 0 && is_space(t[t.len - 1]) { t = t[..t.len - 1]; }
+    var t = trim(s);
     while t.len > 0 && (t[0] == '=' || t[0] == 'v') { t = t[1..]; }
-    let v, ok = parse(t);
+    return valid(out, t);
+}
+
+// valid gives the version text of npm into out. It gives false when the
+// text holds no version.
+fn valid(out: u8[>..]&, s: const u8[:]) -> bool {
+    let v, ok = parse(s);
     if !ok { return false; }
     write_core(out, v);
     return true;
+}
+
+// major gives the major number of the text. It gives false when the text
+// holds no version.
+fn major(s: const u8[:]) -> i64, bool {
+    let v, ok = parse(s);
+    if !ok { return 0, false; }
+    return v.major, true;
+}
+
+// minor gives the minor number of the text. It gives false when the text
+// holds no version.
+fn minor(s: const u8[:]) -> i64, bool {
+    let v, ok = parse(s);
+    if !ok { return 0, false; }
+    return v.minor, true;
+}
+
+// patch gives the patch number of the text. It gives false when the text
+// holds no version.
+fn patch(s: const u8[:]) -> i64, bool {
+    let v, ok = parse(s);
+    if !ok { return 0, false; }
+    return v.patch, true;
+}
+
+// prerelease writes the parts of the pre-release of the text into the
+// list. It gives false when the text holds no version or no
+// pre-release.
+fn prerelease(parts: const u8[:][>..]&, s: const u8[:]) -> bool {
+    let v, ok = parse(s);
+    if !ok { return false; }
+    if v.pre.len == 0 { return false; }
+    let got = split(v.pre, '.');
+    var i = 0;
+    while i < got.len {
+        parts.push(got[i]);
+        i += 1;
+    }
+    return true;
+}
+
+// cmp compares two texts with the operator. It gives false for a bad
+// text or an operator that npm refuses.
+fn cmp(a: const u8[:], op: const u8[:], b: const u8[:]) -> bool {
+    // The operators "===" and "!==" compare the text itself, as npm does.
+    // npm reads them without a parse.
+    if op == "===" { return a == b; }
+    if op == "!==" { return a != b; }
+    let va, oka = parse(a);
+    let vb, okb = parse(b);
+    if !oka || !okb { return false; }
+    let c = compare(va, vb);
+    if op == "" || op == "=" || op == "==" { return c == 0; }
+    if op == "!=" { return c != 0; }
+    if op == ">" { return c > 0; }
+    if op == ">=" { return c >= 0; }
+    if op == "<" { return c < 0; }
+    if op == "<=" { return c <= 0; }
+    return false;
+}
+
+// rcompare gives the reverse of the order of two texts. It gives -1, 0
+// or 1.
+fn rcompare(a: const u8[:], b: const u8[:]) -> i64 {
+    return -compare_text(a, b);
+}
+
+// compare_identifiers compares two pre-release parts. It gives -1, 0
+// or 1. A number comes before a text, and two numbers compare by
+// value. A number of any length compares right.
+fn compare_identifiers(a: const u8[:], b: const u8[:]) -> i64 {
+    let an = is_numeric(a);
+    let bn = is_numeric(b);
+    if an && bn { return compare_numbers(a, b); }
+    if an { return -1; }
+    if bn { return 1; }
+    return compare_bytes(a, b);
+}
+
+// rcompare_identifiers gives the reverse of the order of two pre-release
+// parts. It gives -1, 0 or 1.
+fn rcompare_identifiers(a: const u8[:], b: const u8[:]) -> i64 {
+    return -compare_identifiers(a, b);
+}
+
+// compare_loose compares two texts as npm compareLoose does, with the
+// strict parse. It gives -1, 0 or 1, and 0 for a text that parse
+// refuses. See the limits.
+fn compare_loose(a: const u8[:], b: const u8[:]) -> i64 {
+    return compare_text(a, b);
 }
 
 // ---- ranges -------------------------------------------------------------

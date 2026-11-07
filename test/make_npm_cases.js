@@ -22,6 +22,15 @@ const int = (n) => Math.floor(rnd() * n);
 const pick = (a) => a[int(a.length)];
 
 const PRES = ['', '', '', '-alpha', '-beta.1', '-beta.2', '-0', '-1', '-rc.1.2'];
+// Versions with numbers near the largest that npm holds.
+const BIGS = [
+  '9007199254740991.0.0',
+  '9007199254740990.0.0',
+  '9007199254740991.0.1',
+  '1.0.0-3000000000',
+  '1.0.0-3000000001',
+  '0.0.0-9007199254740991',
+];
 const BUILDS = ['', '', '', '', '+a', '+b', '+1', '+10', '+a.1', '+a.b', '+001'];
 
 function version(withBuild) {
@@ -77,11 +86,12 @@ function goodRange() {
 const q = (s) => JSON.stringify(s);
 const out = [];
 const w = (s) => out.push(s);
-const count = { select: 0, sort: 0, compare: 0, minversion: 0, intersects: 0, subset: 0, outside: 0 };
+const count = { select: 0, sort: 0, compare: 0, minversion: 0, intersects: 0, subset: 0, outside: 0, valid: 0, comparetext: 0, ident: 0, cmp: 0, comparators: 0, simplify: 0 };
 
-w('// Cases made by test/make_npm_cases.js with npm semver ' + require('semver/package.json').version + '.');
-w('// Do not edit by hand. Make the file again with the script.');
-w('');
+const HEAD = [
+  '// Cases made by test/make_npm_cases.js with npm semver ' + require('semver/package.json').version + '.',
+  '// Do not edit by hand. Make the file again with the script.',
+];
 w('namespace npm_cases;');
 w('');
 w('import std;');
@@ -157,6 +167,88 @@ w('}');
 w('');
 w('fn subset_case(a: const u8[:], b: const u8[:], want: bool) {');
 w('    assert(semver::subset(a, b) == want);');
+w('}');
+w('');
+w('fn valid_case(s: const u8[:], want: const u8[:]) {');
+w('    var out: u8[>..] = [];');
+w('    let ok = semver::valid(out, s);');
+w('    if want == "null" {');
+w('        assert(!ok);');
+w('        assert(out.len == 0);');
+w('    } else {');
+w('        assert(ok);');
+w('        assert(out[..] == want);');
+w('    }');
+w('}');
+w('');
+w('fn join_parts(parts: const u8[:][:]) -> u8[>..] {');
+w('    var s: u8[>..] = [];');
+w('    join(s, parts, " ");');
+w('    return s;');
+w('}');
+w('');
+w('fn accessor_case(s: const u8[:], ma: i64, mi: i64, pa: i64, pre: const u8[:]) {');
+w('    let a, ok1 = semver::major(s);');
+w('    let b, ok2 = semver::minor(s);');
+w('    let c, ok3 = semver::patch(s);');
+w('    assert(ok1 && ok2 && ok3);');
+w('    assert(a == ma && b == mi && c == pa);');
+w('    var parts: const u8[:][>..] = [];');
+w('    let ok4 = semver::prerelease(parts, s);');
+w('    if pre == "null" {');
+w('        assert(!ok4);');
+w('        assert(parts.len == 0);');
+w('    } else {');
+w('        assert(ok4);');
+w('        assert(join_parts(parts)[..] == pre);');
+w('    }');
+w('}');
+w('');
+w('fn compare_text_case(a: const u8[:], b: const u8[:], c: i64, rc: i64, loose: i64) {');
+w('    assert(semver::compare_text(a, b) == c);');
+w('    assert(semver::rcompare(a, b) == rc);');
+w('    assert(semver::compare_loose(a, b) == loose);');
+w('}');
+w('');
+w('fn ident_case(a: const u8[:], b: const u8[:], c: i64, rc: i64) {');
+w('    assert(semver::compare_identifiers(a, b) == c);');
+w('    assert(semver::rcompare_identifiers(a, b) == rc);');
+w('}');
+w('');
+w('fn cmp_case(a: const u8[:], op: const u8[:], b: const u8[:], want: bool) {');
+w('    assert(semver::cmp(a, op, b) == want);');
+w('}');
+w('');
+w('fn comparators_case(range: const u8[:], want: const u8[:]) {');
+w('    var norm: u8[>..] = [];');
+w('    var parts: const u8[:][>..] = [];');
+w('    var ends: i64[>..] = [];');
+w('    let ok = semver::to_comparators(norm, parts, ends, range);');
+w('    assert(ok);');
+w('    // The sets go out one after the other.');
+w('    var got: u8[>..] = [];');
+w('    var at: i64 = 0;');
+w('    var i: i64 = 0;');
+w('    while i < ends.len {');
+w('        if i > 0 { got.push(\'|\'); }');
+w('        var j: i64 = at;');
+w('        while j < ends[i] {');
+w('            if j > at { got.push(\' \'); }');
+w('            got.append(parts[j]);');
+w('            j += 1;');
+w('        }');
+w('        at = ends[i];');
+w('        i += 1;');
+w('    }');
+w('    assert(got[..] == want);');
+w('}');
+w('');
+w('fn simplify_case(versions: const u8[:], range: const u8[:], want: const u8[:]) {');
+w('    let vs = words(versions);');
+w('    var out: u8[>..] = [];');
+w('    let ok = semver::simplify_range(out, vs[..], range);');
+w('    assert(ok);');
+w('    assert(out[..] == want);');
 w('}');
 w('');
 w('fn outside_case(v: const u8[:], range: const u8[:], hi: bool, lo: bool) {');
@@ -262,5 +354,95 @@ for (let i = 0; i < 160; i++) {
 }
 w('}');
 
-process.stdout.write(out.join('\n') + '\n');
-process.stderr.write('cases: ' + JSON.stringify(count) + ' total=' + Object.values(count).reduce((a, b) => a + b, 0) + '\n');
+// valid and the accessors
+w('fn check_valid() {');
+for (let i = 0; i < 90; i++) {
+  const v = version(int(3) === 0);
+  const r = int(6);
+  const text = r === 0 ? 'v' + v : (r === 1 ? '  ' + v + ' ' : v);
+  const want = semver.valid(text);
+  w(`    valid_case(${q(text)}, ${q(want === null ? 'null' : want)});`);
+  if (semver.valid(text) !== null) {
+    const p = semver.prerelease(text);
+    const ma = semver.major(text), mi = semver.minor(text), pa = semver.patch(text);
+    const pre = p === null ? 'null' : p.map((x) => String(x)).join(' ');
+    w(`    accessor_case(${q(text)}, ${ma}, ${mi}, ${pa}, ${q(pre)});`);
+  }
+  count.valid++;
+}
+w('}');
+w('');
+
+// the comparison of two texts
+w('fn check_compare_text() {');
+for (let i = 0; i < 90; i++) {
+  let a = version(true);
+  let b = int(4) === 0 ? a.replace(/\+.*/, '') + pick(BUILDS) : version(true);
+  if (i % 7 === 0) { a = pick(BIGS); b = pick(BIGS); }
+  const c = semver.compare(a, b);
+  const rc = semver.rcompare(a, b);
+  const loose = semver.compareLoose(a, b);
+  w(`    compare_text_case(${q(a)}, ${q(b)}, ${c}, ${rc}, ${loose});`);
+  count.comparetext++;
+}
+w('}');
+w('');
+
+// the comparison of two pre-release parts
+w('fn check_identifiers() {');
+const IDENTS = ['1', '2', '10', 'alpha', 'beta', '0', '01', 'x', 'y', 'a',
+  '3000000000', '3000000001', '9007199254740991'];
+for (let i = 0; i < 80; i++) {
+  const a = pick(IDENTS), b = pick(IDENTS);
+  const c = semver.compareIdentifiers(a, b);
+  const rc = semver.rcompareIdentifiers(a, b);
+  w(`    ident_case(${q(a)}, ${q(b)}, ${c}, ${rc});`);
+  count.ident++;
+}
+w('}');
+w('');
+
+// cmp with an operator
+w('fn check_cmp() {');
+const OPS = ['===', '!==', '=', '==', '!=', '>', '>=', '<', '<='];
+for (let i = 0; i < 90; i++) {
+  let a = version(true);
+  let b = int(4) === 0 ? a.replace(/\+.*/, '') + pick(BUILDS) : version(true);
+  if (i % 9 === 0) { a = pick(BIGS); b = pick(BIGS); }
+  const op = pick(OPS);
+  const want = semver.cmp(a, op, b);
+  w(`    cmp_case(${q(a)}, ${q(op)}, ${q(b)}, ${want});`);
+  count.cmp++;
+}
+w('}');
+w('');
+
+// the comparators of a range
+w('fn check_comparators() {');
+for (let i = 0; i < 80; i++) {
+  const r = goodRange();
+  const sets = semver.toComparators(r);
+  const want = sets.map((set) => set.join(' ')).join('|');
+  w(`    comparators_case(${q(r)}, ${q(want)});`);
+  count.comparators++;
+}
+w('}');
+w('');
+
+// the simplified range
+w('fn check_simplify() {');
+for (let i = 0; i < 60; i++) {
+  const n = 1 + int(7);
+  const list = [];
+  for (let k = 0; k < n; k++) list.push(version(int(3) === 0).replace(/[-+].*/, ''));
+  const r = goodRange();
+  const want = semver.simplifyRange(list, r);
+  w(`    simplify_case(${q(list.join(' '))}, ${q(r)}, ${q(want)});`);
+  count.simplify++;
+}
+w('}');
+
+const total = Object.values(count).reduce((a, b) => a + b, 0);
+const head = HEAD.concat(['// The file holds ' + total + ' cases.', '']);
+process.stdout.write(head.concat(out).join('\n') + '\n');
+process.stderr.write('cases: ' + JSON.stringify(count) + ' total=' + total + '\n');
