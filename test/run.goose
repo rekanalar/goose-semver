@@ -3,7 +3,9 @@
 // The order tests take their pairs from the SemVer 2.0.0 standard, part 11.
 
 import std;
+import os;
 import semver from "..";
+import npm_cases;
 
 fn expect_parse(s: const u8[:], ma: i32, mi: i32, pa: i32, pre: const u8[:], build: const u8[:]) {
     let v, ok = semver::parse(s);
@@ -368,6 +370,226 @@ fn test_clean() {
     expect_clean("v=1.2.3", "1.2.3");
 }
 
+// ---- lists, ranges and the algebra of ranges ----------------------------
+
+fn place(list: const u8[:], range: const u8[:], want_max: bool) -> i64 {
+    let vs = words(list);
+    if want_max { return semver::max_satisfying(vs[..], range); }
+    return semver::min_satisfying(vs[..], range);
+}
+
+fn test_select() {
+    assert(place("1.2.3 1.2.4 2.0.0", "^1.2.0", true) == 1);
+    assert(place("1.2.3 1.2.4 2.0.0", "^1.2.0", false) == 0);
+    // A text that is not a version is skipped.
+    assert(place("bad 1.2.3 1.2 x.y.z", "*", true) == 1);
+    assert(place("bad 1.2.3 1.2 x.y.z", "*", false) == 1);
+    // No version fits, a bad range, an empty list: -1.
+    assert(place("1.2.3 2.0.0", ">=3.0.0", true) == -1);
+    assert(place("1.2.3 2.0.0", "not a range", true) == -1);
+    assert(place("1.2.3 2.0.0", "not a range", false) == -1);
+    assert(place("", "*", true) == -1);
+    assert(place("", "*", false) == -1);
+    // An equal version does not replace an earlier one.
+    assert(place("1.2.3+a 1.2.3+b", "*", true) == 0);
+    assert(place("1.2.3+a 1.2.3+b", "*", false) == 0);
+    // A pre-release follows the rule of satisfies.
+    assert(place("1.3.0-beta.1 1.2.0", "^1.2.0", true) == 1);
+    assert(place("1.3.0-beta.1 1.2.0", "^1.3.0-0", true) == 0);
+}
+
+fn ordered(list: const u8[:], desc: bool) -> u8[>..] {
+    let vs = words(list);
+    var order: i64[>..] = [];
+    if desc { semver::rsort(order, vs[..]); } else { semver::sort(order, vs[..]); }
+    var s: u8[>..] = [];
+    for p, i in order {
+        if i > 0 { s.push(' '); }
+        s.append(vs[p]);
+    }
+    return s;
+}
+
+fn test_sort() {
+    assert(ordered("1.0.0 1.2.0 1.1.0", false)[..] == "1.0.0 1.1.0 1.2.0");
+    assert(ordered("1.0.0 1.2.0 1.1.0", true)[..] == "1.2.0 1.1.0 1.0.0");
+    // The build part decides between equal versions.
+    assert(ordered("1.0.0+b 1.0.0+a 1.0.0", false)[..] == "1.0.0 1.0.0+a 1.0.0+b");
+    assert(ordered("1.0.0+a.10 1.0.0+a.2", false)[..] == "1.0.0+a.2 1.0.0+a.10");
+    // A pre-release comes first.
+    assert(ordered("1.0.0 1.0.0-rc.1 1.0.0-alpha", false)[..] == "1.0.0-alpha 1.0.0-rc.1 1.0.0");
+    // A text that is not a version goes last, in the order of the input.
+    assert(ordered("2.0.0 bad 1.0.0 worse", false)[..] == "1.0.0 2.0.0 bad worse");
+    assert(ordered("2.0.0 bad 1.0.0 worse", true)[..] == "2.0.0 1.0.0 bad worse");
+    // An empty list, and a list of one.
+    assert(ordered("", false).len == 0);
+    assert(ordered("1.0.0", true)[..] == "1.0.0");
+}
+
+fn test_named_compare() {
+    let a, _ = semver::parse("1.2.3");
+    let b, _ = semver::parse("1.2.4");
+    let c, _ = semver::parse("1.2.3+b");
+    assert(semver::lt(a, b) && semver::lte(a, b) && semver::neq(a, b));
+    assert(!semver::gt(a, b) && !semver::gte(a, b) && !semver::eq(a, b));
+    assert(semver::eq(a, c) && semver::gte(a, c) && semver::lte(a, c));
+    assert(!semver::neq(a, c) && !semver::gt(a, c) && !semver::lt(a, c));
+    assert(semver::compare_build(a, c) < 0);
+    assert(semver::compare_build(c, a) > 0);
+    assert(semver::compare_build(a, a) == 0);
+}
+
+fn min_of(range: const u8[:]) -> u8[>..] {
+    var out: u8[>..] = [];
+    let ok = semver::min_version(out, range);
+    if !ok { assert(out.len == 0); }
+    return out;
+}
+
+fn test_range_algebra() {
+    assert(min_of("^1.2.3")[..] == "1.2.3");
+    assert(min_of(">1.2.3")[..] == "1.2.4");
+    assert(min_of(">1.0.0-beta")[..] == "1.0.0-beta.0");
+    assert(min_of("*")[..] == "0.0.0");
+    assert(min_of("<0.0.0").len == 0);
+    assert(min_of(">=2.0.0 <1.0.0").len == 0);
+    assert(min_of("not a range").len == 0);
+    assert(semver::intersects("^1.2.0", ">=1.5.0"));
+    assert(!semver::intersects("<1.0.0", ">1.0.0"));
+    assert(semver::intersects("*", "1.2.3"));
+    assert(!semver::intersects("^1.0.0 || ^3.0.0", "^2.0.0"));
+    assert(semver::subset("^1.2.0", "^1.0.0"));
+    assert(!semver::subset("^1.0.0", "^1.2.0"));
+    assert(semver::subset("1.2.3", "^1.0.0"));
+    assert(semver::subset("^1.0.0 || ^2.0.0", ">=1.0.0 <3.0.0"));
+    assert(semver::subset("^1.0.0", "*"));
+    assert(!semver::subset("*", "^1.0.0"));
+    // The same text is a subset of itself.
+    assert(semver::subset("^1.2.3", "^1.2.3"));
+}
+
+fn test_outside() {
+    let hi, _ = semver::parse("2.0.0");
+    let mid, _ = semver::parse("1.5.0");
+    let lo, _ = semver::parse("0.1.0");
+    assert(semver::gtr(hi, "^1.0.0") && !semver::ltr(hi, "^1.0.0"));
+    assert(semver::ltr(lo, "^1.0.0") && !semver::gtr(lo, "^1.0.0"));
+    assert(!semver::gtr(mid, "^1.0.0") && !semver::ltr(mid, "^1.0.0"));
+    assert(semver::outside(hi, "^1.0.0", ">"));
+    assert(semver::outside(lo, "^1.0.0", "<"));
+}
+
+// A bad range, a bad version or a bad direction gives the neutral result.
+// No call aborts.
+fn test_no_abort() {
+    let v, _ = semver::parse("1.0.0");
+    let bad = ["", "bad", "1.2.3.4", "^", ">=", "||", "1.x.3", "99999999999.0.0", ">0.0.2147483647"];
+    for r in bad {
+        place("1.0.0 bad", r, true);
+        place("1.0.0 bad", r, false);
+        var out: u8[>..] = [];
+        semver::min_version(out, r);
+        semver::intersects(r, "*");
+        semver::intersects("*", r);
+        semver::subset(r, "*");
+        semver::subset("*", r);
+        semver::gtr(v, r);
+        semver::ltr(v, r);
+    }
+    assert(!semver::intersects("bad", "*"));
+    assert(!semver::subset("bad", "*"));
+    assert(!semver::gtr(v, "bad"));
+    assert(!semver::ltr(v, "bad"));
+    assert(!semver::outside(v, "^1.0.0", "x"));
+    assert(!semver::outside(v, "^1.0.0", ""));
+    var out: u8[>..] = [];
+    assert(!semver::min_version(out, "bad"));
+    assert(out.len == 0);
+}
+
+fn repeat(unit: const u8[:], n: i64) -> u8[>..] {
+    var s: u8[>..] = [];
+    for i in 0..n { s.append(unit); }
+    return s;
+}
+
+// The seconds that a call may take on hostile input.
+const HOSTILE_NS: i64 = 2000000000;
+
+fn test_hostile() {
+    let t0 = clock_ns();
+    // A range above the limits counts as bad.
+    let many = repeat("1.0.0 || ", 10000);
+    assert(many.len > semver::MAX_RANGE_BYTES);
+    assert(place("1.0.0", many[..], true) == -1);
+    assert(!semver::intersects(many[..], "*"));
+    assert(!semver::subset(many[..], "*"));
+    assert(!semver::subset("*", many[..]));
+    var out: u8[>..] = [];
+    assert(!semver::min_version(out, many[..]));
+    // More alternatives than the limit, in few bytes.
+    var dense = repeat("1||", 1500);
+    dense.append("1");
+    assert(dense.len < semver::MAX_RANGE_BYTES);
+    assert(place("1.0.0", dense[..], true) == -1);
+    assert(clock_ns() - t0 < HOSTILE_NS);
+
+    // Exactly the limit: every pair of alternatives is tried.
+    let t1 = clock_ns();
+    let edge = repeat("1.0.0||", 1023);
+    var edge2: u8[>..] = [];
+    edge2.append(edge[..]);
+    edge2.append("2.0.0");
+    assert(semver::intersects(edge2[..], "2.0.0"));
+    assert(!semver::intersects(edge2[..], "3.0.0"));
+    assert(!semver::subset(edge2[..], "1.0.0"));
+    assert(semver::subset(edge2[..], ">=1.0.0 <3.0.0"));
+    // One alternative more than the limit: the range counts as bad.
+    var over: u8[>..] = [];
+    over.append(edge[..]);
+    over.append("1.0.0||2.0.0");
+    assert(!semver::intersects(over[..], "2.0.0"));
+    assert(clock_ns() - t1 < HOSTILE_NS);
+
+    // A set of many comparators.
+    let t2 = clock_ns();
+    let wide = repeat(">=1.0.0 ", 2000);
+    assert(wide.len < semver::MAX_RANGE_BYTES);
+    assert(place("1.5.0", wide[..], true) == 0);
+    assert(semver::intersects(wide[..], wide[..]));
+    assert(semver::subset(wide[..], ">=1.0.0"));
+    assert(clock_ns() - t2 < HOSTILE_NS);
+
+    // A list of many texts.
+    let t3 = clock_ns();
+    var list: u8[>..] = [];
+    for i in 0..10000 {
+        if i > 0 { list.push(' '); }
+        format(list, i % 50);
+        list.append(".");
+        format(list, i % 7);
+        list.append(".");
+        format(list, i);
+    }
+    let vs = words(list[..]);
+    assert(vs.len == 10000);
+    assert(semver::max_satisfying(vs[..], "^3.0.0") >= 0);
+    assert(semver::min_satisfying(vs[..], "^3.0.0") >= 0);
+    var order: i64[>..] = [];
+    semver::sort(order, vs[..]);
+    assert(order.len == 10000);
+    var i: i64 = 1;
+    while i < order.len {
+        let a, _ = semver::parse(vs[order[i - 1]]);
+        let b, _ = semver::parse(vs[order[i]]);
+        assert(semver::compare_build(a, b) <= 0);
+        i += 1;
+    }
+    semver::rsort(order, vs[..]);
+    assert(order.len == 10000);
+    assert(clock_ns() - t3 < HOSTILE_NS);
+}
+
 fn main() {
     test_parse();
     test_parse_faults();
@@ -380,6 +602,20 @@ fn main() {
     test_diff();
     test_coerce();
     test_clean();
+    test_select();
+    test_sort();
+    test_named_compare();
+    test_range_algebra();
+    test_outside();
+    test_no_abort();
+    test_hostile();
+    npm_cases::check_select();
+    npm_cases::check_sort();
+    npm_cases::check_compare();
+    npm_cases::check_min_version();
+    npm_cases::check_intersects();
+    npm_cases::check_subset();
+    npm_cases::check_outside();
     print("all tests passed");
     return 0;
 }

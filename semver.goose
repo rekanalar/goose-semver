@@ -12,6 +12,7 @@
 namespace semver;
 
 import std;
+import range;
 
 // Version holds one version. The pre-release and the build metadata are
 // slices into the string that the parse read, so they stay valid only as
@@ -449,15 +450,7 @@ fn clean(out: u8[>..]&, s: const u8[:]) -> bool {
     while t.len > 0 && (t[0] == '=' || t[0] == 'v') { t = t[1..]; }
     let v, ok = parse(t);
     if !ok { return false; }
-    format(out, v.major);
-    out.push('.');
-    format(out, v.minor);
-    out.push('.');
-    format(out, v.patch);
-    if v.pre.len > 0 {
-        out.push('-');
-        out.append(v.pre);
-    }
+    write_core(out, v);
     return true;
 }
 
