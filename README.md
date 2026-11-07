@@ -136,22 +136,6 @@ holds 1510 cases:
 
 Each result equals the result of npm.
 
-## Changes in v0.4.0
-
-- Before: `compare` gave any negative or positive number. Now it gives
-  -1, 0 or 1, as npm does.
-- Before: a pre-release number above 2147483647 compared as zero. Now
-  the number is read and the order follows npm.
-- Before: the numbers of a version were `i32`. Now they are `i64`, and
-  the package holds the numbers up to 9007199254740991.
-- Before: `parse` refused a leading `v` and the space around the text.
-  Now it reads both, as npm does. A leading `=` stays a fault.
-- Before: `parse` read any length. Now a text above 256 bytes is a fault, as in npm.
-- New: `valid`, `major`, `minor`, `patch` and `prerelease`.
-- New: `cmp`, `rcompare`, `compare_identifiers`, `rcompare_identifiers`
-  and `compare_loose`.
-- New: `to_comparators` and `simplify_range`.
-
 ## Limits
 
 - Numbers are `i64`. A number above 9007199254740991 is not a version.
