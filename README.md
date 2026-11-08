@@ -150,6 +150,30 @@ holds 1920 cases:
 
 Each result equals the result of npm.
 
+## Security
+
+The package reads version texts and range texts from people we do not
+know. These protections go beyond the reference libraries.
+
+- The parser refuses a version text above 256 bytes and a number above
+  9007199254740991. The Rust `semver` crate and Go `Masterminds/semver`
+  take a larger number, so they read a long chain of digits. npm has the
+  same caps.
+- The range parser refuses a range above 16384 bytes and a range with more
+  than 1024 alternatives. The Rust crate and the Go library have no such
+  caps. A range from an untrusted source cannot make the package build a
+  set of many versions.
+
+These risks stay.
+
+- The package writes nothing to a file, a command or a page. It only
+  compares and formats text.
+- The parts of a pre-release stay as they were written. A program that
+  puts them into a command, a path or a page must check them.
+- The parser refuses a text that the standard refuses, such as a leading
+  zero in a number part. The Rust crate and npm read some of these texts
+  in a loose mode. This package has no loose mode.
+
 ## Limits
 
 - Numbers are `i64`. A number above 9007199254740991 is not a version.
