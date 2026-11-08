@@ -20,14 +20,14 @@ Semantic versions for the [Goose](https://github.com/aardappel/goose) programmin
 Put this line in the root file of your program:
 
 ```goose
-import semver from "rekanalar/goose-semver@v1.0.0";
+import semver from "rekanalar/goose-semver@v1.0.1";
 ```
 
 ## Example
 
 ```goose
 import std;
-import semver from "rekanalar/goose-semver@v1.0.0";
+import semver from "rekanalar/goose-semver@v1.0.1";
 
 fn main() {
     let a, ok = semver::parse("1.2.3-alpha.1");
