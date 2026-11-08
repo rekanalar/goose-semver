@@ -118,8 +118,11 @@ semver::sort(order, releases[..]);                           // 0 1 2
 - `intersects`, `subset`, `min_version` and `outside` follow the code of
   npm 7.6.1. They keep its rules for the null set and the pre-release.
 - A range above 16384 bytes, or with more than 1024 `||` alternatives,
-  counts as bad. The compare of two ranges tries every pair of
-  alternatives, so the limits bound its time.
+  counts as bad for every call. The compare of two ranges tries every
+  pair of alternatives, so the limits bound its time. npm has no byte
+  or count limit.
+- `parse` takes a version text of 256 bytes at most. npm has the same
+  limit.
 
 The differences from npm:
 
@@ -150,13 +153,19 @@ Each result equals the result of npm.
 ## Limits
 
 - Numbers are `i64`. A number above 9007199254740991 is not a version.
-- A numeric part of a pre-release is a number in npm. It stays a text
-  here.
-- No loose mode. Only npm has one. Go `Masterminds/semver` reads a
-  lenient version. The Rust `semver` crate refuses it. Python `packaging`
-  follows PEP 440. The libraries disagree, and no standard fixes it.
-- `coerce` has no right-to-left mode and no pre-release option. Only npm
-  has them. The Go, Rust and Python libraries have no coerce at all.
+  npm has the same cap. The Rust `semver` crate and Go
+  `Masterminds/semver` take larger numbers.
+- The `prerelease` call gives the parts of a pre-release as texts. npm
+  gives a number for a numeric part. The order of two versions is the
+  same in both.
+- No loose mode. npm loose takes `=1.2.3`, `1.2.3beta` and `v 1.2.3`.
+  Go `Masterminds/semver` takes `1.2` and `v1.2.3`, and refuses
+  `=1.2.3`. The Rust `semver` crate refuses all of them. Python
+  `packaging` takes `1.2` and reads `1.2.3beta` as a pre-release. The
+  libraries disagree, and no standard fixes it.
+- `coerce` takes no options. npm has a right-to-left mode and a
+  pre-release flag. The Go, Rust and Python libraries have no coerce
+  at all.
 - `compare_identifiers` compares a number of any length, digit by
   digit. npm reads a number up to 9007199254740991 and rounds a larger
   one.
