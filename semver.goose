@@ -848,9 +848,11 @@ fn norm_set(set: const u8[:], seg: u8[>..]&, nullset: bool&, inc: bool) -> bool 
 // null, the first stays. It returns false when the range is not valid or
 // above MAX_RANGE_BYTES.
 fn normalize(out: u8[>..]&, range: const u8[:], inc: bool) -> bool {
-    // Every call reads a range through here, so the size limit stands here.
+    // Every call reads a range through here, so the size limit and the
+    // count of alternatives stand here, as in parse_range.
     if range.len > MAX_RANGE_BYTES { return false; }
     let sets = split(range, "||");
+    if sets.len > MAX_ALTERNATIVES { return false; }
     var all = false;
     // The texts of the sets stand in one buffer; ends marks where each stops.
     var buf: u8[>..] = [];
